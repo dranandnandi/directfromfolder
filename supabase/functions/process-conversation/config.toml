@@ -1,0 +1,2 @@
+[process-conversation]
+allow_net = ["generativelanguage.googleapis.com", "hnyqfasddflqzfibtjjz.supabase.co"]
