@@ -1,9 +1,181 @@
 import React, { useState, useEffect } from 'react';
-import { HiUsers, HiClock, HiExclamationCircle, HiCheck, HiX, HiEye } from 'react-icons/hi';
+import { HiUsers, HiClock, HiExclamationCircle, HiCheck, HiX, HiEye, HiLocationMarker, HiCamera } from 'react-icons/hi';
 import { AttendanceService } from '../../services/attendanceService';
 import { Attendance, AttendanceRegularization } from '../../models/attendance';
 import { supabase } from '../../utils/supabaseClient';
 import PunchInOut from './PunchInOut';
+
+interface AttendanceDetailModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  attendance: any;
+}
+
+const AttendanceDetailModal: React.FC<AttendanceDetailModalProps> = ({
+  isOpen,
+  onClose,
+  attendance
+}) => {
+  if (!isOpen || !attendance) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-96 overflow-y-auto">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-semibold">Attendance Details - {attendance.user?.name}</h3>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600"
+          >
+            <HiX className="w-6 h-6" />
+          </button>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Basic Info */}
+          <div className="space-y-4">
+            <h4 className="font-medium text-gray-900">Basic Information</h4>
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span className="text-sm text-gray-600">Date:</span>
+                <span className="text-sm font-medium">{new Date(attendance.date).toLocaleDateString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-gray-600">Department:</span>
+                <span className="text-sm font-medium">{attendance.user?.department || 'N/A'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-gray-600">Total Hours:</span>
+                <span className="text-sm font-medium">{attendance.total_hours ? `${attendance.total_hours}h` : 'N/A'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-gray-600">Status:</span>
+                <span className={`text-sm px-2 py-1 rounded-full ${
+                  attendance.attendance_status === 'present' ? 'bg-green-100 text-green-800' :
+                  attendance.attendance_status === 'late' ? 'bg-yellow-100 text-yellow-800' :
+                  attendance.attendance_status === 'absent' ? 'bg-red-100 text-red-800' :
+                  'bg-gray-100 text-gray-800'
+                }`}>
+                  {attendance.attendance_status || 'Unknown'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Shift Information */}
+          {attendance.shift_name && (
+            <div className="space-y-4">
+              <h4 className="font-medium text-gray-900">Shift Information</h4>
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Shift:</span>
+                  <span className="text-sm font-medium">{attendance.shift_name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Expected Time:</span>
+                  <span className="text-sm font-medium">
+                    {attendance.shift_start_time} - {attendance.shift_end_time}
+                  </span>
+                </div>
+                {attendance.minutes_late_or_early && (
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-600">Late/Early:</span>
+                    <span className={`text-sm font-medium ${attendance.minutes_late_or_early > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                      {Math.abs(attendance.minutes_late_or_early)} minutes {attendance.minutes_late_or_early > 0 ? 'late' : 'early'}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Punch In Details */}
+          {attendance.punch_in_time && (
+            <div className="space-y-4">
+              <h4 className="font-medium text-gray-900 flex items-center gap-2">
+                <HiCamera className="w-4 h-4" />
+                Punch In Details
+              </h4>
+              <div className="space-y-3">
+                <div>
+                  <span className="text-sm text-gray-600">Time:</span>
+                  <div className="text-sm font-medium">{new Date(attendance.punch_in_time).toLocaleString()}</div>
+                </div>
+                {attendance.punch_in_address && (
+                  <div>
+                    <span className="text-sm text-gray-600 flex items-center gap-1">
+                      <HiLocationMarker className="w-3 h-3" />
+                      Location:
+                    </span>
+                    <div className="text-sm">{attendance.punch_in_address}</div>
+                  </div>
+                )}
+                {attendance.punch_in_selfie_url && (
+                  <div>
+                    <span className="text-sm text-gray-600">Photo:</span>
+                    <div className="mt-1">
+                      <img 
+                        src={attendance.punch_in_selfie_url} 
+                        alt="Punch In Photo" 
+                        className="w-24 h-24 object-cover rounded-lg"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Punch Out Details */}
+          {attendance.punch_out_time && (
+            <div className="space-y-4">
+              <h4 className="font-medium text-gray-900 flex items-center gap-2">
+                <HiCamera className="w-4 h-4" />
+                Punch Out Details
+              </h4>
+              <div className="space-y-3">
+                <div>
+                  <span className="text-sm text-gray-600">Time:</span>
+                  <div className="text-sm font-medium">{new Date(attendance.punch_out_time).toLocaleString()}</div>
+                </div>
+                {attendance.punch_out_address && (
+                  <div>
+                    <span className="text-sm text-gray-600 flex items-center gap-1">
+                      <HiLocationMarker className="w-3 h-3" />
+                      Location:
+                    </span>
+                    <div className="text-sm">{attendance.punch_out_address}</div>
+                  </div>
+                )}
+                {attendance.punch_out_selfie_url && (
+                  <div>
+                    <span className="text-sm text-gray-600">Photo:</span>
+                    <div className="mt-1">
+                      <img 
+                        src={attendance.punch_out_selfie_url} 
+                        alt="Punch Out Photo" 
+                        className="w-24 h-24 object-cover rounded-lg"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+        
+        <div className="flex justify-end mt-6">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 interface RegularizationModalProps {
   isOpen: boolean;
@@ -95,6 +267,8 @@ const AttendanceDashboard: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [loading, setLoading] = useState(true);
   const [showRegularizations, setShowRegularizations] = useState(false);
+  const [showAttendanceDetail, setShowAttendanceDetail] = useState(false);
+  const [selectedAttendance, setSelectedAttendance] = useState<any>(null);
   const [organizationId, setOrganizationId] = useState<string>('');
 
   useEffect(() => {
@@ -133,71 +307,136 @@ const AttendanceDashboard: React.FC = () => {
     try {
       setLoading(true);
       
-      // First, get all employees from the organization
-      const { data: employees } = await supabase
-        .from('users')
-        .select('id, name, department, role')
-        .eq('organization_id', organizationId)
-        .in('role', ['admin', 'user']) // Both admin and regular users are employees
-        .order('name');
-
-      if (!employees) {
-        setAttendance([]);
-        setRegularizations([]);
-        setLoading(false);
-        return;
-      }
-
-      // Get attendance data for the selected date
-      const { data: attendanceData } = await supabase
-        .from('attendance')
-        .select(`
-          *,
-          user:users!attendance_user_id_fkey(id, name, department, role)
-        `)
-        .eq('organization_id', organizationId)
-        .eq('date', selectedDate);
-
-      // Create attendance records for all employees (even if they haven't punched in)
-      const attendanceMap = new Map();
-      
-      // Add existing attendance records
-      if (attendanceData) {
-        attendanceData.forEach(record => {
-          attendanceMap.set(record.user_id, record);
+      // Use our enhanced function to get comprehensive attendance data
+      const { data: attendanceData, error: attendanceError } = await supabase
+        .rpc('get_attendance_with_details', {
+          p_organization_id: organizationId,
+          p_date: selectedDate
         });
-      }
 
-      // Create placeholder records for employees without attendance
-      const allAttendanceRecords = employees.map(employee => {
-        const existingRecord = attendanceMap.get(employee.id);
-        
-        if (existingRecord) {
-          return existingRecord;
-        } else {
-          // Create a placeholder record for employees who haven't punched in
-          return {
-            id: `placeholder-${employee.id}`,
-            user_id: employee.id,
-            organization_id: organizationId,
-            date: selectedDate,
-            punch_in_time: null,
-            punch_out_time: null,
-            total_hours: null,
-            is_late: false,
-            is_early_out: false,
-            is_absent: true,
-            is_regularized: false,
-            user: employee
-          };
+      if (attendanceError) {
+        console.error('Error fetching attendance data:', attendanceError);
+        // Fallback to original query if the new function fails
+        const { data: employees } = await supabase
+          .from('users')
+          .select('id, name, department, role')
+          .eq('organization_id', organizationId)
+          .in('role', ['admin', 'user'])
+          .order('name');
+
+        if (!employees) {
+          setAttendance([]);
+          setRegularizations([]);
+          setLoading(false);
+          return;
         }
-      });
+
+        const { data: fallbackData } = await supabase
+          .from('attendance_dashboard_view')
+          .select('*')
+          .eq('organization_id', organizationId)
+          .eq('date', selectedDate);
+
+        const attendanceMap = new Map();
+        if (fallbackData) {
+          fallbackData.forEach(record => {
+            attendanceMap.set(record.user_id, {
+              ...record,
+              user: {
+                id: record.user_id,
+                name: record.user_name,
+                department: record.user_department,
+                role: record.user_role
+              }
+            });
+          });
+        }
+
+        const allAttendanceRecords = employees.map(employee => {
+          const existingRecord = attendanceMap.get(employee.id);
+          
+          if (existingRecord) {
+            return existingRecord;
+          } else {
+            return {
+              id: `placeholder-${employee.id}`,
+              user_id: employee.id,
+              organization_id: organizationId,
+              date: selectedDate,
+              punch_in_time: null,
+              punch_out_time: null,
+              total_hours: null,
+              is_late: false,
+              is_early_out: false,
+              is_absent: true,
+              is_regularized: false,
+              attendance_status: 'absent',
+              user: employee
+            };
+          }
+        });
+
+        setAttendance(allAttendanceRecords);
+      } else {
+        // Transform the function result to match our component expectations
+        const transformedData = attendanceData.map((record: any) => ({
+          ...record,
+          user: {
+            id: record.user_id,
+            name: record.user_name,
+            department: record.user_department,
+            role: record.user_role
+          }
+        }));
+
+        // Get all employees to ensure we show everyone
+        const { data: allEmployees } = await supabase
+          .from('users')
+          .select('id, name, department, role')
+          .eq('organization_id', organizationId)
+          .in('role', ['admin', 'user'])
+          .order('name');
+
+        if (allEmployees) {
+          const attendanceMap = new Map();
+          transformedData.forEach((record: any) => {
+            attendanceMap.set(record.user_id, record);
+          });
+
+          const completeAttendanceRecords = allEmployees.map(employee => {
+            const existingRecord = attendanceMap.get(employee.id);
+            
+            if (existingRecord) {
+              return existingRecord;
+            } else {
+              return {
+                id: `placeholder-${employee.id}`,
+                user_id: employee.id,
+                organization_id: organizationId,
+                date: selectedDate,
+                punch_in_time: null,
+                punch_out_time: null,
+                total_hours: null,
+                is_late: false,
+                is_early_out: false,
+                is_absent: true,
+                is_regularized: false,
+                attendance_status: 'absent',
+                user: employee
+              };
+            }
+          });
+
+          setAttendance(completeAttendanceRecords);
+        } else {
+          setAttendance(transformedData);
+        }
+      }
 
       const [regularizationData] = await Promise.all([
         AttendanceService.getPendingRegularizations(organizationId)
       ]);
 
-      setAttendance(allAttendanceRecords);
       setRegularizations(regularizationData);
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -404,6 +643,9 @@ const AttendanceDashboard: React.FC = () => {
                   Employee
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Shift
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Punch In
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -429,20 +671,69 @@ const AttendanceDashboard: React.FC = () => {
                       <div className="text-sm text-gray-500">{record.user?.department}</div>
                     </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {record.punch_in_time 
-                      ? new Date(record.punch_in_time).toLocaleTimeString() 
-                      : '-'
-                    }
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">
+                      {(record as any).shift_name ? (
+                        <div>
+                          <div className="font-medium">{(record as any).shift_name}</div>
+                          <div className="text-xs text-gray-500">
+                            {(record as any).shift_start_time} - {(record as any).shift_end_time}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-gray-400">No shift assigned</span>
+                      )}
+                    </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {record.punch_out_time 
-                      ? new Date(record.punch_out_time).toLocaleTimeString() 
-                      : '-'
-                    }
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">
+                      {record.punch_in_time ? (
+                        <div>
+                          <div>{new Date(record.punch_in_time).toLocaleTimeString()}</div>
+                          {(record as any).punch_in_address && (
+                            <div className="text-xs text-gray-500 flex items-center gap-1 mt-1">
+                              <HiLocationMarker className="w-3 h-3" />
+                              {(record as any).punch_in_address.substring(0, 30)}...
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        '-'
+                      )}
+                    </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {record.total_hours ? `${record.total_hours.toFixed(2)}h` : '-'}
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">
+                      {record.punch_out_time ? (
+                        <div>
+                          <div>{new Date(record.punch_out_time).toLocaleTimeString()}</div>
+                          {(record as any).punch_out_address && (
+                            <div className="text-xs text-gray-500 flex items-center gap-1 mt-1">
+                              <HiLocationMarker className="w-3 h-3" />
+                              {(record as any).punch_out_address.substring(0, 30)}...
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        record.punch_in_time ? 'Still checked in' : '-'
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">
+                      {record.total_hours !== null && record.total_hours !== undefined ? (
+                        <div>
+                          <div className="font-medium">{record.total_hours}h</div>
+                          {(record as any).effective_hours && (
+                            <div className="text-xs text-gray-500">
+                              Effective: {(record as any).effective_hours}h
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        '-'
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex flex-col gap-1">
@@ -468,7 +759,7 @@ const AttendanceDashboard: React.FC = () => {
                       )}
                       {record.punch_in_time && !record.is_late && !record.is_early_out && !record.is_absent && (
                         <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                          On Time
+                          {(record as any).attendance_status === 'checked_in' ? 'Checked In' : 'On Time'}
                         </span>
                       )}
                     </div>
@@ -488,8 +779,15 @@ const AttendanceDashboard: React.FC = () => {
                           Regularize
                         </button>
                       )}
-                      <button className="text-gray-600 hover:text-gray-900">
+                      <button 
+                        className="text-gray-600 hover:text-gray-900 flex items-center gap-1"
+                        onClick={() => {
+                          setSelectedAttendance(record);
+                          setShowAttendanceDetail(true);
+                        }}
+                      >
                         <HiEye className="w-4 h-4" />
+                        Details
                       </button>
                     </div>
                   </td>
@@ -497,7 +795,7 @@ const AttendanceDashboard: React.FC = () => {
               ))}
               {attendance.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-4 text-center text-gray-500">
+                  <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
                     No employees found for this organization
                   </td>
                 </tr>
@@ -513,6 +811,12 @@ const AttendanceDashboard: React.FC = () => {
         regularizations={regularizations}
         onApprove={handleApproveRegularization}
         onReject={handleRejectRegularization}
+      />
+
+      <AttendanceDetailModal
+        isOpen={showAttendanceDetail}
+        onClose={() => setShowAttendanceDetail(false)}
+        attendance={selectedAttendance}
       />
     </div>
   );

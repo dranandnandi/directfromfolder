@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { HiX, HiOfficeBuilding, HiChartBar, HiCog, HiQuestionMarkCircle, HiUserGroup, HiTrash, HiRefresh, HiUsers, HiCalendar, HiClock } from 'react-icons/hi';
 import { supabase } from '../utils/supabaseClient';
 import { OrganizationSettings } from '../models/task';
@@ -12,21 +13,49 @@ interface SidebarProps {
   organizationSettings: OrganizationSettings;
 }
 
-const MenuItem = ({ icon: Icon, children, onClick, active = false }: { icon: any; children: React.ReactNode; onClick?: () => void; active?: boolean }) => (
-  <button 
-    className={`w-full flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-blue-50 rounded-lg transition-colors ${active ? 'bg-blue-50 text-blue-600' : ''}`}
-    onClick={onClick}
-  >
-    <Icon className="w-5 h-5" />
-    <span className="text-sm font-medium">{children}</span>
-  </button>
-);
+const MenuItem = ({ icon: Icon, children, to, onClick, active = false }: { 
+  icon: any; 
+  children: React.ReactNode; 
+  to?: string;
+  onClick?: () => void; 
+  active?: boolean 
+}) => {
+  if (to) {
+    return (
+      <Link 
+        to={to}
+        className={`w-full flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-blue-50 rounded-lg transition-colors ${active ? 'bg-blue-50 text-blue-600' : ''}`}
+        onClick={onClick}
+      >
+        <Icon className="w-5 h-5" />
+        <span className="text-sm font-medium">{children}</span>
+      </Link>
+    );
+  }
+
+  return (
+    <button 
+      className={`w-full flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-blue-50 rounded-lg transition-colors ${active ? 'bg-blue-50 text-blue-600' : ''}`}
+      onClick={onClick}
+    >
+      <Icon className="w-5 h-5" />
+      <span className="text-sm font-medium">{children}</span>
+    </button>
+  );
+};
 
 const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole, organizationSettings }) => {
-  const [activeView, setActiveView] = useState('dashboard');
+  const location = useLocation();
+
+  const getActiveView = () => {
+    const path = location.pathname;
+    if (path === '/') return 'dashboard';
+    return path.substring(1); // Remove leading slash
+  };
+
+  const activeView = getActiveView();
 
   const handleNavigation = (view: string) => {
-    setActiveView(view);
     onNavigate(view);
   };
 
@@ -63,28 +92,28 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
           <nav className="space-y-1 mb-6">
             <MenuItem 
               icon={HiOfficeBuilding} 
-              onClick={() => handleNavigation('dashboard')}
+              to="/"
               active={activeView === 'dashboard'}
             >
               Dashboard
             </MenuItem>
             <MenuItem 
               icon={HiClock}
-              onClick={() => handleNavigation('attendance')}
+              to="/attendance"
               active={activeView === 'attendance'}
             >
               Attendance
             </MenuItem>
             <MenuItem 
               icon={HiUserGroup} 
-              onClick={() => handleNavigation('team')}
+              to="/team"
               active={activeView === 'team'}
             >
               Team Management
             </MenuItem>
             <MenuItem 
               icon={HiChartBar}
-              onClick={() => handleNavigation('reports')}
+              to="/reports"
               active={activeView === 'reports'}
             >
               Reports
@@ -92,7 +121,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
             {(userRole === 'admin' || userRole === 'superadmin') && (
               <MenuItem 
                 icon={HiTrash}
-                onClick={() => handleNavigation('deleteTasks')}
+                to="/deleteTasks"
                 active={activeView === 'deleteTasks'}
               >
                 Delete Tasks
@@ -100,14 +129,14 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
             )}
             <MenuItem 
               icon={HiRefresh}
-              onClick={() => handleNavigation('recurringTasks')}
+              to="/recurringTasks"
               active={activeView === 'recurringTasks'}
             >
               Recurring Tasks
             </MenuItem>
             <MenuItem 
               icon={HiChartBar}
-              onClick={() => handleNavigation('performanceReports')}
+              to="/performanceReports"
               active={activeView === 'performanceReports'}
             >
               Performance Reports
@@ -115,7 +144,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
             {/* Temporarily hidden conversation monitoring
             <MenuItem 
               icon={HiMicrophone}
-              onClick={() => handleNavigation('conversations')}
+              to="/conversations"
               active={activeView === 'conversations'} 
             >
               Conversation Monitoring
@@ -124,7 +153,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
             {(userRole === 'admin' || userRole === 'superadmin') && (
               <MenuItem 
                 icon={HiUsers}
-                onClick={() => handleNavigation('adminDashboard')}
+                to="/adminDashboard"
                 active={activeView === 'adminDashboard'}
               >
                 Admin Dashboard
@@ -132,7 +161,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
             )}
             <MenuItem 
               icon={HiCalendar}
-              onClick={() => handleNavigation('leaveManagement')}
+              to="/leaveManagement"
               active={activeView === 'leaveManagement'}
             >
               Leave Management
@@ -146,7 +175,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
           <div className="mt-auto space-y-1">
             <MenuItem 
               icon={HiCog} 
-              onClick={() => handleNavigation('settings')}
+              to="/settings"
               active={activeView === 'settings'}
             >
               Settings

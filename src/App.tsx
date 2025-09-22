@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { Routes, Route, useNavigate } from 'react-router-dom';
 import { supabase, retryOperation } from './utils/supabaseClient';
 import LoginForm from './components/auth/LoginForm';
 import Sidebar from './components/Sidebar';
@@ -17,6 +18,7 @@ const PerformanceReports = lazy(() => import('./components/PerformanceReports'))
 const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
 const LeaveManagement = lazy(() => import('./components/LeaveManagement'));
 const PunchInOut = lazy(() => import('./components/hr/PunchInOut'));
+const AttendanceDashboard = lazy(() => import('./components/hr/AttendanceDashboard'));
 import { Task, TaskType, User, OrganizationSettings, TaskStatus, TaskPriority } from './models/task';
 
 // Define interfaces for raw Supabase response data
@@ -67,10 +69,10 @@ interface RawSupabasePersonalTask {
 }
 
 function App() {
+  const navigate = useNavigate();
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [currentView, setCurrentView] = useState('dashboard');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [selectedTaskType, setSelectedTaskType] = useState<TaskType | null>(null);
@@ -909,87 +911,14 @@ function App() {
     );
   }
 
+  // Navigation handler for sidebar
+  const handleNavigation = (view: string) => {
+    navigate(`/${view === 'dashboard' ? '' : view}`);
+  };
+
   if (!session) {
     return <LoginForm />;
   }
-
-  // Render the current view based on the `currentView` state
-  const renderContent = () => {
-    switch (currentView) {
-      case 'settings':
-        return (
-          <Suspense fallback={<div className="p-4">Loading settings...</div>}>
-            <Settings />
-          </Suspense>
-        );
-      case 'team':
-        return (
-          <Suspense fallback={<div className="p-4">Loading team management...</div>}>
-            <TeamManagement />
-          </Suspense>
-        );
-      case 'reports':
-        return (
-          <Suspense fallback={<div className="p-4">Loading reports...</div>}>
-            <Reports />
-          </Suspense>
-        );
-      case 'deleteTasks':
-        return (
-          <Suspense fallback={<div className="p-4">Loading delete tasks...</div>}>
-            <DeleteTasks teamMembers={teamMembers} onTasksRefreshed={handleGlobalRefresh} />
-          </Suspense>
-        );
-      case 'recurringTasks':
-        return (
-          <Suspense fallback={<div className="p-4">Loading recurring tasks...</div>}>
-            <RecurringTasksManager teamMembers={teamMembers} organizationSettings={organizationSettings} />
-          </Suspense>
-        );
-      case 'performanceReports':
-        return (
-          <Suspense fallback={<div className="p-4">Loading performance reports...</div>}>
-            <PerformanceReports />
-          </Suspense>
-        );
-      case 'conversations':
-        return (
-          <Suspense fallback={<div className="p-4">Loading conversation dashboard...</div>}>
-            <ConversationDashboard />
-          </Suspense>
-        );
-      case 'adminDashboard':
-        return (
-          <Suspense fallback={<div className="p-4">Loading admin dashboard...</div>}>
-            <AdminDashboard adminUserId={session?.user?.id || ''} />
-          </Suspense>
-        );
-      case 'leaveManagement':
-        return (
-          <Suspense fallback={<div className="p-4">Loading leave management...</div>}>
-            <LeaveManagement userId={session?.user?.id} isAdmin={userRole === 'admin' || userRole === 'superadmin'} />
-          </Suspense>
-        );
-      case 'attendance':
-        return (
-          <Suspense fallback={<div className="p-4">Loading attendance...</div>}>
-            <PunchInOut />
-          </Suspense>
-        );
-      default:
-        return (
-          <DashboardContainer 
-            currentUserId={session?.user?.id}
-            tasks={tasks} 
-            personalTasks={personalTasks}
-            onAddTask={handleAddTaskClick}
-            onEditTask={handleEditTask}
-            onTaskUpdate={handleRefreshTasks}
-            teamMembers={teamMembers}
-          />
-        );
-    }
-  };
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -998,7 +927,7 @@ function App() {
         <Sidebar 
           isOpen={true} 
           onClose={() => {}} 
-          onNavigate={setCurrentView} 
+          onNavigate={handleNavigation} 
           userRole={userRole}
           organizationSettings={organizationSettings}
         />
@@ -1012,7 +941,7 @@ function App() {
             isOpen={sidebarOpen} 
             onClose={() => setSidebarOpen(false)} 
             onNavigate={(view) => {
-              setCurrentView(view);
+              handleNavigation(view);
               setSidebarOpen(false);
             }}
             userRole={userRole}
@@ -1026,9 +955,88 @@ function App() {
         {/* Header */}
         <Header onMenuClick={() => setSidebarOpen(true)} onRefresh={handleGlobalRefresh} organizationSettings={organizationSettings} />
         
-        {/* Main content */}
+        {/* Main content with Routes */}
         <main className="p-4 lg:p-6">
-          {renderContent()}
+          <Routes>
+            <Route path="/" element={
+              <DashboardContainer 
+                currentUserId={session?.user?.id}
+                tasks={tasks} 
+                personalTasks={personalTasks}
+                onAddTask={handleAddTaskClick}
+                onEditTask={handleEditTask}
+                onTaskUpdate={handleRefreshTasks}
+                teamMembers={teamMembers}
+              />
+            } />
+            <Route path="/settings" element={
+              <Suspense fallback={<div className="p-4">Loading settings...</div>}>
+                <Settings />
+              </Suspense>
+            } />
+            <Route path="/team" element={
+              <Suspense fallback={<div className="p-4">Loading team management...</div>}>
+                <TeamManagement />
+              </Suspense>
+            } />
+            <Route path="/reports" element={
+              <Suspense fallback={<div className="p-4">Loading reports...</div>}>
+                <Reports />
+              </Suspense>
+            } />
+            <Route path="/deleteTasks" element={
+              <Suspense fallback={<div className="p-4">Loading delete tasks...</div>}>
+                <DeleteTasks teamMembers={teamMembers} onTasksRefreshed={handleGlobalRefresh} />
+              </Suspense>
+            } />
+            <Route path="/recurringTasks" element={
+              <Suspense fallback={<div className="p-4">Loading recurring tasks...</div>}>
+                <RecurringTasksManager teamMembers={teamMembers} organizationSettings={organizationSettings} />
+              </Suspense>
+            } />
+            <Route path="/performanceReports" element={
+              <Suspense fallback={<div className="p-4">Loading performance reports...</div>}>
+                <PerformanceReports />
+              </Suspense>
+            } />
+            <Route path="/conversations" element={
+              <Suspense fallback={<div className="p-4">Loading conversation dashboard...</div>}>
+                <ConversationDashboard />
+              </Suspense>
+            } />
+            <Route path="/adminDashboard" element={
+              <Suspense fallback={<div className="p-4">Loading admin dashboard...</div>}>
+                <AdminDashboard adminUserId={session?.user?.id || ''} />
+              </Suspense>
+            } />
+            <Route path="/leaveManagement" element={
+              <Suspense fallback={<div className="p-4">Loading leave management...</div>}>
+                <LeaveManagement userId={session?.user?.id} isAdmin={userRole === 'admin' || userRole === 'superadmin'} />
+              </Suspense>
+            } />
+            <Route path="/attendance" element={
+              <Suspense fallback={<div className="p-4">Loading attendance...</div>}>
+                <AttendanceDashboard />
+              </Suspense>
+            } />
+            <Route path="/punch" element={
+              <Suspense fallback={<div className="p-4">Loading punch in/out...</div>}>
+                <PunchInOut />
+              </Suspense>
+            } />
+            {/* Catch-all route - redirect to dashboard */}
+            <Route path="*" element={
+              <DashboardContainer 
+                currentUserId={session?.user?.id}
+                tasks={tasks} 
+                personalTasks={personalTasks}
+                onAddTask={handleAddTaskClick}
+                onEditTask={handleEditTask}
+                onTaskUpdate={handleRefreshTasks}
+                teamMembers={teamMembers}
+              />
+            } />
+          </Routes>
         </main>
 
         {/* Task Modal */}
