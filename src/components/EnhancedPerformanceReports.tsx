@@ -153,10 +153,27 @@ const EnhancedPerformanceReports: React.FC<EnhancedPerformanceReportsProps> = ({
           break;
       }
 
+      // Get current user's organization for filtering
+      const { data: currentUser } = await supabase.auth.getUser();
+      if (!currentUser.user?.id) {
+        throw new Error('User not authenticated');
+      }
+
+      const { data: currentUserData } = await supabase
+        .from('users')
+        .select('organization_id')
+        .eq('auth_id', currentUser.user.id)
+        .single();
+
+      if (!currentUserData?.organization_id) {
+        throw new Error('Organization not found');
+      }
+
       // Fetch users and their data
       let userQuery = supabase
         .from('users')
-        .select('id, name, department, role');
+        .select('id, name, department, role')
+        .eq('organization_id', currentUserData.organization_id);
 
       if (!isAdmin && currentUserId) {
         userQuery = userQuery.eq('id', currentUserId);
@@ -173,6 +190,7 @@ const EnhancedPerformanceReports: React.FC<EnhancedPerformanceReportsProps> = ({
           .from('tasks')
           .select('*')
           .eq('assigned_to', user.id)
+          .eq('organization_id', currentUserData.organization_id)
           .gte('created_at', startDate.toISOString())
           .lte('created_at', endDate.toISOString());
 
@@ -182,6 +200,8 @@ const EnhancedPerformanceReports: React.FC<EnhancedPerformanceReportsProps> = ({
           .eq('assignee_id', user.id)
           .gte('created_at', startDate.toISOString())
           .lte('created_at', endDate.toISOString());
+
+        console.log(`EnhancedPerformanceReports - User ${user.name}: tasks=${tasks?.length || 0}, personal=${personalTasks?.length || 0}`);
 
         // Fetch conversation data if available
         const { data: conversations } = await supabase

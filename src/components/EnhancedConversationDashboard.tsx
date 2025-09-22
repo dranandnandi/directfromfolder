@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  HiMicrophone, 
   HiDocumentText, 
   HiChartBar, 
   HiExclamation,
@@ -11,7 +10,7 @@ import {
   HiShieldExclamation
 } from 'react-icons/hi';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
-import ConversationRecorder from './ConversationRecorder';
+// import ConversationRecorder from './SimplifiedConversationRecorder'; // Hidden temporarily
 import ConversationList from './ConversationList';
 import ConversationDetails from './ConversationDetails';
 import { supabase } from '../utils/supabaseClient';
@@ -64,15 +63,13 @@ interface EnhancedStats {
 }
 
 interface EnhancedConversationDashboardProps {
-  taskId?: string;
   isAdmin?: boolean;
 }
 
 const EnhancedConversationDashboard: React.FC<EnhancedConversationDashboardProps> = ({
-  taskId,
   isAdmin = false
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'record' | 'list' | 'analytics' | 'insights'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'list' | 'analytics' | 'insights'>('overview');
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<ConversationLog | null>(null);
   const [stats, setStats] = useState<EnhancedStats>({
@@ -360,7 +357,7 @@ const EnhancedConversationDashboard: React.FC<EnhancedConversationDashboardProps
 
       {/* Enhanced Tabs */}
       <div className="flex space-x-2 overflow-x-auto">
-        {['overview', 'record', 'list', 'analytics', 'insights'].map((tab) => (
+        {['overview', 'list', 'analytics', 'insights'].map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab as any)}
@@ -371,7 +368,7 @@ const EnhancedConversationDashboard: React.FC<EnhancedConversationDashboardProps
             }`}
           >
             {tab === 'overview' && <HiChartBar className="w-5 h-5" />}
-            {tab === 'record' && <HiMicrophone className="w-5 h-5" />}
+            {/* {tab === 'record' && <HiMicrophone className="w-5 h-5" />} */}
             {tab === 'list' && <HiDocumentText className="w-5 h-5" />}
             {tab === 'analytics' && <HiTrendingUp className="w-5 h-5" />}
             {tab === 'insights' && <HiLightBulb className="w-5 h-5" />}
@@ -474,15 +471,15 @@ const EnhancedConversationDashboard: React.FC<EnhancedConversationDashboardProps
         </div>
       )}
 
-      {activeTab === 'record' && (
+      {/* Hidden temporarily - conversation recording feature */}
+      {/* {activeTab === 'record' && (
         <ConversationRecorder
-          taskId={taskId}
           onRecordingComplete={() => {
             fetchEnhancedStats();
             setActiveTab('list');
           }}
         />
-      )}
+      )} */}
 
       {activeTab === 'list' && (
         <ConversationList

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colorPrimary">#3F51B5</color>
+    <color name="colorPrimaryDark">#303F9F</color>
+    <color name="colorAccent">#FF4081</color>
+    
+    <!-- Task Manager App Colors -->
+    <color name="primary_blue">#2563EB</color>
+    <color name="primary_blue_dark">#1D4ED8</color>
+    <color name="secondary_green">#059669</color>
+    <color name="warning_orange">#D97706</color>
+    <color name="danger_red">#DC2626</color>
+    
+    <!-- Background Colors -->
+    <color name="background_light">#F8FAFC</color>
+    <color name="background_white">#FFFFFF</color>
+    <color name="background_gray">#F1F5F9</color>
+    
+    <!-- Text Colors -->
+    <color name="text_primary">#1E293B</color>
+    <color name="text_secondary">#64748B</color>
+    <color name="text_muted">#94A3B8</color>
+    
+    <!-- Status Colors -->
+    <color name="status_pending">#F59E0B</color>
+    <color name="status_in_progress">#3B82F6</color>
+    <color name="status_completed">#10B981</color>
+    <color name="status_overdue">#EF4444</color>
+    
+    <!-- Priority Colors -->
+    <color name="priority_high">#DC2626</color>
+    <color name="priority_medium">#F59E0B</color>
+    <color name="priority_low">#10B981</color>
+    
+    <!-- Notification Colors -->
+    <color name="notification_background">#1F2937</color>
+    <color name="notification_accent">#3B82F6</color>
+</resources>

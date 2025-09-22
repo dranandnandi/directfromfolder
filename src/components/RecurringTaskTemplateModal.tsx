@@ -20,7 +20,7 @@ const RecurringTaskTemplateModal: React.FC<RecurringTaskTemplateModalProps> = ({
     title: '',
     description: '',
     patientId: '',
-    type: TaskType.QuickAdvisory,
+    type: TaskType.RegularTask,
     priority: TaskPriority.Moderate,
     assignee: null as User | null,
     location: '',
@@ -59,8 +59,8 @@ const RecurringTaskTemplateModal: React.FC<RecurringTaskTemplateModalProps> = ({
       return;
     }
 
-    if (template.type === TaskType.ClinicalRound && !template.location) {
-      alert('Location/Room is mandatory for Clinical Round recurring templates.');
+    if (template.type === TaskType.PatientTracking && !template.location) {
+      alert('Location/Room is mandatory for Patient Tracking recurring templates.');
       return;
     }
 
@@ -118,7 +118,7 @@ const RecurringTaskTemplateModal: React.FC<RecurringTaskTemplateModalProps> = ({
         title: '',
         description: '',
         patientId: '',
-        type: TaskType.QuickAdvisory,
+        type: TaskType.RegularTask,
         priority: TaskPriority.Moderate,
         assignee: null,
         location: '',
@@ -152,7 +152,7 @@ const RecurringTaskTemplateModal: React.FC<RecurringTaskTemplateModalProps> = ({
       title: '',
       description: '',
       patientId: '',
-      type: TaskType.QuickAdvisory,
+      type: TaskType.RegularTask,
       priority: TaskPriority.Moderate,
       assignee: null,
       location: '',
@@ -175,7 +175,7 @@ const RecurringTaskTemplateModal: React.FC<RecurringTaskTemplateModalProps> = ({
 
   const renderTypeSpecificFields = () => {
     switch (template.type) {
-      case TaskType.ClinicalRound:
+      case TaskType.PatientTracking:
         return (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -230,9 +230,9 @@ const RecurringTaskTemplateModal: React.FC<RecurringTaskTemplateModalProps> = ({
               onChange={(e) => setTemplate({ ...template, type: e.target.value as TaskType })}
               required
             >
-              <option value={TaskType.QuickAdvisory}>Regular Tasks</option>
-              <option value={TaskType.ClinicalRound}>Patient Tracking</option>
-              <option value={TaskType.FollowUp}>Audit Task</option>
+              <option value={TaskType.RegularTask}>Regular Tasks</option>
+              <option value={TaskType.PatientTracking}>Patient Tracking</option>
+              <option value={TaskType.AuditTask}>Audit Task</option>
               <option value={TaskType.PersonalTask}>Personal Task</option>
             </select>
           </div>

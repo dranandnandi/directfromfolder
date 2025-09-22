@@ -8,15 +8,35 @@ export const generateTaskFromText = async (
   text: string,
   teamMembers: User[],
   selectedType: TaskType,
-  organizationSettings: OrganizationSettings
+  organizationSettings: OrganizationSettings,
+  enhancedContext?: {
+    availableTeamMembers: { name: string; role: string; department: string; }[];
+    organizationName: string;
+  }
 ) => {
   try {
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
+    const organizationName = enhancedContext?.organizationName || organizationSettings.name;
+    const availableTeamMembers = enhancedContext?.availableTeamMembers || 
+      teamMembers.map(member => ({ name: member.name, role: member.role, department: member.department }));
+
     const prompt = `
-You are a medical task parser. Convert the following text into a structured task. 
+You are a medical task parser for "${organizationName}". Convert the following text into a structured task. 
 The task MUST be of type "${selectedType}".
 Return ONLY a valid JSON object without any additional text or formatting.
+
+Available team members for assignment:
+${availableTeamMembers.map(member => `- ${member.name} (${member.role}, ${member.department})`).join('\n')}
+
+Input text to parse: "${text}"
+
+When extracting assignee information, look for:
+- Exact names: "assign to Dr. Smith"
+- Partial names: "give this to John" (match with John Doe)
+- Roles: "assign to the nurse" (match with nurses)
+- Departments: "give to cardiology team"
+
 The JSON must follow this exact structure:
 {
   "title": "Brief, clear task title",
@@ -28,32 +48,31 @@ The JSON must follow this exact structure:
   "roundType": "For clinical rounds: ${organizationSettings.roundTypes.join('/')}, otherwise null",
   "advisoryType": "For quick advisory: ${organizationSettings.advisoryTypes.join('/')}, otherwise null",
   "followUpType": "For follow-ups: ${organizationSettings.followUpTypes.join('/')}, otherwise null",
-  "assigneeName": "If a team member is mentioned by name, extract it, otherwise null",
+  "assigneeName": "Name or role mentioned for assignment (from available team members), otherwise null",
   "hoursToComplete": "For clinical rounds, extract number of hours mentioned (e.g., '4' for '4 hours'), otherwise null",
   "contactNumber": "Extract any phone number mentioned (e.g., +91-1234567890, 123-456-7890), otherwise null",
-  "dueDate": "Extract any due date or time mentioned, format as ISO string (e.g., '2023-12-31T23:59:59Z'), otherwise null",
-  "subTasks": [
-    {
-      "title": "Sub-task title if mentioned",
-      "description": "Sub-task description if mentioned",
-      "contactNumber": "Sub-task specific phone number if mentioned",
-      "dueDate": "Sub-task specific due date if mentioned"
-    }
-  ]
+  "whatsappNumber": "Extract WhatsApp number if mentioned separately, otherwise null",
+  "taskDate": "Extract due date if mentioned, format as YYYY-MM-DD, otherwise null",
+  "taskTime": "Extract due time if mentioned, format as HH:MM, otherwise null"
 }
+
+Medical abbreviations understanding:
+- "round" = clinical round
+- "f/u" or "follow up" = follow up task
+- "pt" = patient
+- "ward" = location
+- "stat" = urgent/critical priority
+- "routine" = moderate priority
+- "Dr." = doctor
+- "nurse" = nursing staff
 
 Rules:
 1. ONLY return valid JSON, no other text
 2. All fields must be present
 3. Use null for optional fields that don't apply
-4. Type must be exactly one of: quickAdvisory, clinicalRound, followUp
+4. Type must be exactly one of: quickAdvisory, clinicalRound, followUp, personalTask
 5. Priority must be exactly one of: critical, moderate, lessImportant
-6. Extract ALL phone numbers mentioned (e.g., +91-1234567890, 123-456-7890)
-7. Extract ALL dates and times mentioned (e.g., "tomorrow" → ISO date, "in 2 hours" → ISO date)
-8. For clinical rounds:
-   - Look for time expressions like "in X hours", "within X hours", "after X hours"
-   - Extract the number of hours and set in hoursToComplete
-   - Only set hoursToComplete for clinical rounds
+6. For assigneeName, extract the most relevant team member name or role from the available list
    - If no hours mentioned for clinical rounds, default to 4 hours
 9. If sub-tasks are mentioned, include them in the subTasks array
 10. PRESERVE ALL original values mentioned in the text, do not modify or generate new ones

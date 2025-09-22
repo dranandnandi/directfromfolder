@@ -143,9 +143,9 @@ const RecurringTasksManager: React.FC<RecurringTasksManagerProps> = ({
 
   const getTaskTypeLabel = (type: TaskType) => {
     switch (type) {
-      case TaskType.QuickAdvisory: return 'Regular Tasks';
-      case TaskType.ClinicalRound: return 'Patient Tracking';
-      case TaskType.FollowUp: return 'Audit Tasks';
+      case TaskType.RegularTask: return 'Regular Tasks';
+      case TaskType.PatientTracking: return 'Patient Tracking';
+      case TaskType.AuditTask: return 'Audit Tasks';
       case TaskType.PersonalTask: return 'Personal Task';
       default: return type;
     }

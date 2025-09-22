@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { HiMicrophone, HiDocumentText, HiChartBar, HiExclamation } from 'react-icons/hi';
-import ConversationRecorder from './ConversationRecorder';
+import { HiDocumentText, HiChartBar, HiExclamation, HiClock } from 'react-icons/hi';
+// import ConversationRecorder from './SimplifiedConversationRecorder'; // Hidden temporarily
 import ConversationList from './ConversationList';
 import ConversationDetails from './ConversationDetails';
+import PunchInOut from './hr/PunchInOut';
 import { supabase } from '../utils/supabaseClient';
 
 interface ConversationAnalysis {
@@ -34,15 +35,13 @@ interface ConversationLog {
 }
 
 interface ConversationDashboardProps {
-  taskId?: string;
   isAdmin?: boolean;
 }
 
 const ConversationDashboard: React.FC<ConversationDashboardProps> = ({
-  taskId,
   isAdmin = false
 }) => {
-  const [activeTab, setActiveTab] = useState<'record' | 'list' | 'stats'>('list');
+  const [activeTab, setActiveTab] = useState<'record' | 'list' | 'stats' | 'attendance'>('list');
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<ConversationLog | null>(null);
   const [stats, setStats] = useState({
@@ -164,13 +163,13 @@ const ConversationDashboard: React.FC<ConversationDashboardProps> = ({
     }
   };
 
-  // Function to handle recording complete
-  const handleRecordingComplete = () => {
-    // Refresh stats
-    fetchStats();
-    // Switch to list view
-    setActiveTab('list');
-  };
+  // Function to handle recording complete - Hidden with conversation recording
+  // const handleRecordingComplete = () => {
+  //   // Refresh stats
+  //   fetchStats();
+  //   // Switch to list view
+  //   setActiveTab('list');
+  // };
 
   return (
     <div className="space-y-6">
@@ -179,7 +178,8 @@ const ConversationDashboard: React.FC<ConversationDashboardProps> = ({
         
         {/* Tabs */}
         <div className="flex space-x-2">
-          <button
+          {/* Hidden temporarily - conversation recording */}
+          {/* <button
             onClick={() => setActiveTab('record')}
             className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
               activeTab === 'record'
@@ -189,6 +189,17 @@ const ConversationDashboard: React.FC<ConversationDashboardProps> = ({
           >
             <HiMicrophone className="w-5 h-5" />
             <span className="hidden sm:inline">Record</span>
+          </button> */}
+          <button
+            onClick={() => setActiveTab('attendance')}
+            className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
+              activeTab === 'attendance'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            <HiClock className="w-5 h-5" />
+            <span className="hidden sm:inline">Attendance</span>
           </button>
           <button
             onClick={() => setActiveTab('list')}
@@ -245,12 +256,12 @@ const ConversationDashboard: React.FC<ConversationDashboardProps> = ({
       </div>
       
       {/* Main Content */}
-      {activeTab === 'record' && (
+      {/* Hidden temporarily - conversation recording */}
+      {/* {activeTab === 'record' && (
         <ConversationRecorder
-          taskId={taskId}
           onRecordingComplete={handleRecordingComplete}
         />
-      )}
+      )} */}
       
       {activeTab === 'list' && (
         <ConversationList
@@ -259,6 +270,8 @@ const ConversationDashboard: React.FC<ConversationDashboardProps> = ({
           onSelectConversation={setSelectedConversation}
         />
       )}
+      
+      {activeTab === 'attendance' && <PunchInOut />}
       
       {activeTab === 'stats' && (
         <div className="bg-white rounded-lg shadow-sm p-6">

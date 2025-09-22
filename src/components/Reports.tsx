@@ -226,9 +226,9 @@ const Reports = () => {
               <div className="h-80">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={[
-                    { name: 'Regular Tasks', count: tasks.filter(t => t.type === TaskType.QuickAdvisory).length },
-                    { name: 'Patient Tracking', count: tasks.filter(t => t.type === TaskType.ClinicalRound).length },
-                    { name: 'Audit Task', count: tasks.filter(t => t.type === TaskType.FollowUp).length },
+                    { name: 'Regular Tasks', count: tasks.filter(t => t.type === TaskType.RegularTask).length },
+                    { name: 'Patient Tracking', count: tasks.filter(t => t.type === TaskType.PatientTracking).length },
+                    { name: 'Audit Task', count: tasks.filter(t => t.type === TaskType.AuditTask).length },
                     { name: 'Personal Task', count: tasks.filter(t => t.type === TaskType.PersonalTask).length }
                   ]}>
                     <CartesianGrid strokeDasharray="3 3" />

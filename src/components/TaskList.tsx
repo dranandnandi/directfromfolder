@@ -77,9 +77,9 @@ const TaskList: React.FC<TaskListProps> = ({ tasks }) => {
         {/* Task Type Tabs */}
         <div className="flex gap-2 overflow-x-auto pb-2">
           <TabButton type="all" label="All Tasks" />
-          <TabButton type={TaskType.QuickAdvisory} label="Regular Task" />
-          <TabButton type={TaskType.ClinicalRound} label="Patient Tracking" />
-          <TabButton type={TaskType.FollowUp} label="Audit Task" />
+          <TabButton type={TaskType.RegularTask} label="Regular Task" />
+          <TabButton type={TaskType.PatientTracking} label="Patient Tracking" />
+          <TabButton type={TaskType.AuditTask} label="Audit Task" />
         </div>
       </div>
 
@@ -107,7 +107,7 @@ const TaskList: React.FC<TaskListProps> = ({ tasks }) => {
                         <div className="text-sm text-gray-500">{task.description}</div>
                         {task.assignees?.[0] && (
                           <div className="text-sm text-purple-600">
-                            {task.type === TaskType.ClinicalRound ? 'Supervisor: ' : 'Assigned to: '}
+                            {task.type === TaskType.PatientTracking ? 'Supervisor: ' : 'Assigned to: '}
                             {task.assignees[0].name}
                           </div>
                         )}
@@ -126,14 +126,14 @@ const TaskList: React.FC<TaskListProps> = ({ tasks }) => {
                     <span className={clsx(
                       'px-2 py-1 rounded text-sm',
                       {
-                        'bg-purple-100 text-purple-800': task.type === TaskType.QuickAdvisory,
-                        'bg-blue-100 text-blue-800': task.type === TaskType.ClinicalRound,
-                        'bg-green-100 text-green-800': task.type === TaskType.FollowUp
+                        'bg-purple-100 text-purple-800': task.type === TaskType.RegularTask,
+                        'bg-blue-100 text-blue-800': task.type === TaskType.PatientTracking,
+                        'bg-green-100 text-green-800': task.type === TaskType.AuditTask
                       }
                     )}>
-                      {task.type === TaskType.QuickAdvisory && 'Regular Task'}
-                      {task.type === TaskType.ClinicalRound && 'Patient Tracking'}
-                      {task.type === TaskType.FollowUp && 'Audit Task'}
+                      {task.type === TaskType.RegularTask && 'Regular Task'}
+                      {task.type === TaskType.PatientTracking && 'Patient Tracking'}
+                      {task.type === TaskType.AuditTask && 'Audit Task'}
                     </span>
                   </td>
                   <td className="py-3">

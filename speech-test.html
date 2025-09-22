@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Web Speech API Test</title>
+</head>
+<body>
+    <h1>Web Speech API Test</h1>
+    <button id="startBtn">Start Listening</button>
+    <button id="stopBtn">Stop Listening</button>
+    <div id="status">Ready</div>
+    <div id="transcript" style="border: 1px solid #ccc; padding: 10px; margin: 10px 0; min-height: 100px;"></div>
+    <div id="volume" style="display: flex; gap: 2px; margin: 10px 0;">
+        <div class="bar" style="width: 20px; height: 10px; background: #ccc;"></div>
+        <div class="bar" style="width: 20px; height: 15px; background: #ccc;"></div>
+        <div class="bar" style="width: 20px; height: 20px; background: #ccc;"></div>
+        <div class="bar" style="width: 20px; height: 25px; background: #ccc;"></div>
+        <div class="bar" style="width: 20px; height: 30px; background: #ccc;"></div>
+    </div>
+
+    <script>
+        let recognition = null;
+        let audioContext = null;
+        let analyser = null;
+        let isListening = false;
+
+        // Check if Web Speech API is supported
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = () => {
+                document.getElementById('status').textContent = 'Listening...';
+                isListening = true;
+            };
+
+            recognition.onresult = (event) => {
+                let transcript = '';
+                for (let i = 0; i < event.results.length; i++) {
+                    transcript += event.results[i][0].transcript + ' ';
+                }
+                document.getElementById('transcript').textContent = transcript;
+            };
+
+            recognition.onerror = (event) => {
+                document.getElementById('status').textContent = 'Error: ' + event.error;
+                console.error('Speech recognition error:', event);
+            };
+
+            recognition.onend = () => {
+                document.getElementById('status').textContent = 'Stopped';
+                isListening = false;
+            };
+        } else {
+            document.getElementById('status').textContent = 'Web Speech API not supported';
+        }
+
+        // Audio visualization
+        async function startAudioVisualization() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                audioContext = new AudioContext();
+                analyser = audioContext.createAnalyser();
+                const source = audioContext.createMediaStreamSource(stream);
+                
+                analyser.fftSize = 256;
+                source.connect(analyser);
+                
+                updateVolume();
+            } catch (error) {
+                console.error('Microphone access denied:', error);
+                document.getElementById('status').textContent = 'Microphone access denied';
+            }
+        }
+
+        function updateVolume() {
+            if (!analyser || !isListening) return;
+            
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteFrequencyData(dataArray);
+            
+            const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
+            const level = Math.min(average / 50, 5); // Scale to 0-5 bars
+            
+            const bars = document.querySelectorAll('.bar');
+            bars.forEach((bar, index) => {
+                bar.style.background = index < level ? '#4CAF50' : '#ccc';
+            });
+            
+            if (isListening) {
+                requestAnimationFrame(updateVolume);
+            }
+        }
+
+        document.getElementById('startBtn').onclick = async () => {
+            if (recognition) {
+                await startAudioVisualization();
+                recognition.start();
+            }
+        };
+
+        document.getElementById('stopBtn').onclick = () => {
+            if (recognition) {
+                recognition.stop();
+                isListening = false;
+                if (audioContext) {
+                    audioContext.close();
+                }
+            }
+        };
+    </script>
+</body>
+</html>

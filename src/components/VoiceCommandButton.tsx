@@ -59,7 +59,7 @@ const VoiceCommandButton: React.FC<VoiceCommandButtonProps> = ({ onVoiceCommand 
   if (error) {
     return (
       <button
-        className="bg-gray-100 text-gray-400 px-3 py-2 rounded-lg cursor-not-allowed"
+        className="bg-gray-100 text-gray-400 px-3 py-2 rounded-lg cursor-not-allowed min-h-[44px] flex items-center"
         disabled
         title={error}
       >
@@ -71,15 +71,16 @@ const VoiceCommandButton: React.FC<VoiceCommandButtonProps> = ({ onVoiceCommand 
   return (
     <button
       onClick={handleClick}
-      className={`px-3 py-2 rounded-lg flex items-center gap-2 transition-colors ${
+      className={`px-3 sm:px-3 py-2 sm:py-2 rounded-lg flex items-center gap-2 transition-colors min-h-[44px] ${
         isListening
           ? 'bg-red-100 text-red-600 animate-pulse'
-          : 'bg-blue-100 text-blue-600 hover:bg-blue-200'
+          : 'bg-blue-100 text-blue-600 hover:bg-blue-200 active:bg-blue-300'
       }`}
       title={isListening ? 'Stop listening' : 'Start voice command'}
     >
-      <HiMicrophone className="w-5 h-5" />
-      {isListening && <span className="text-sm">Listening...</span>}
+      <HiMicrophone className="w-5 h-5 sm:w-5 sm:h-5" />
+      {isListening && <span className="text-sm hidden sm:inline">Listening...</span>}
+      {isListening && <span className="text-xs sm:hidden">●</span>}
     </button>
   );
 };

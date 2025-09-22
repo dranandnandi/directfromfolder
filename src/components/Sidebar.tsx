@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { HiX, HiOfficeBuilding, HiChartBar, HiCog, HiQuestionMarkCircle, HiUserGroup, HiTrash, HiRefresh, HiMicrophone, HiUsers, HiCalendar } from 'react-icons/hi';
+import { HiX, HiOfficeBuilding, HiChartBar, HiCog, HiQuestionMarkCircle, HiUserGroup, HiTrash, HiRefresh, HiUsers, HiCalendar, HiClock } from 'react-icons/hi';
 import { supabase } from '../utils/supabaseClient';
 import { OrganizationSettings } from '../models/task';
 import dcpLogo from '/notification-icon.svg';
@@ -69,6 +69,13 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
               Dashboard
             </MenuItem>
             <MenuItem 
+              icon={HiClock}
+              onClick={() => handleNavigation('attendance')}
+              active={activeView === 'attendance'}
+            >
+              Attendance
+            </MenuItem>
+            <MenuItem 
               icon={HiUserGroup} 
               onClick={() => handleNavigation('team')}
               active={activeView === 'team'}
@@ -105,6 +112,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
             >
               Performance Reports
             </MenuItem>
+            {/* Temporarily hidden conversation monitoring
             <MenuItem 
               icon={HiMicrophone}
               onClick={() => handleNavigation('conversations')}
@@ -112,6 +120,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
             >
               Conversation Monitoring
             </MenuItem>
+            */}
             {(userRole === 'admin' || userRole === 'superadmin') && (
               <MenuItem 
                 icon={HiUsers}

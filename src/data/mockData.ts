@@ -3,7 +3,7 @@ import { Task, TaskType, TaskPriority, TaskStatus } from '../models/task';
 export const mockTasks: Task[] = [
   {
     id: '1',
-    type: TaskType.QuickAdvisory,
+    type: TaskType.RegularTask,
     title: 'Post-consultation advice',
     description: 'Provide medication instructions for patient after dental procedure',
     patientId: 'P001',
@@ -14,7 +14,7 @@ export const mockTasks: Task[] = [
   },
   {
     id: '2',
-    type: TaskType.ClinicalRound,
+    type: TaskType.PatientTracking,
     title: 'Morning Round - Room 204',
     description: 'Check vital signs and update patient chart',
     patientId: 'P002',
@@ -26,7 +26,7 @@ export const mockTasks: Task[] = [
   },
   {
     id: '3',
-    type: TaskType.FollowUp,
+    type: TaskType.AuditTask,
     title: 'Post-surgery follow-up',
     description: 'Schedule follow-up appointment for knee surgery patient',
     patientId: 'P003',

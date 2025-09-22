@@ -25,6 +25,20 @@ interface ExistingLeaveRequest {
   is_post_facto: boolean;
   requested_at: string;
   comments?: string;
+  employee_name?: string;
+  employee_department?: string;
+}
+
+interface LeaveRequestMetadata {
+  leave_type?: string;
+  start_date?: string;
+  end_date?: string;
+  reason?: string;
+  is_post_facto?: boolean;
+  is_emergency?: boolean;
+  employee_id?: string;
+  employee_name?: string;
+  employee_department?: string;
 }
 
 const LeaveRequestForm: React.FC<LeaveRequestFormProps> = ({
@@ -48,25 +62,73 @@ const LeaveRequestForm: React.FC<LeaveRequestFormProps> = ({
     setError('');
 
     try {
+      // Get the user's organization and find the admin
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('id, organization_id, name, department')
+        .eq('auth_id', userId)
+        .maybeSingle();
+
+      if (userError) {
+        console.error('User lookup error:', userError);
+        throw new Error(`Failed to find user information: ${userError.message}`);
+      }
+
+      if (!userData) {
+        throw new Error('User not found. Please check your login status.');
+      }
+
+      if (!userData.organization_id) {
+        throw new Error('You are not assigned to an organization. Please contact your administrator.');
+      }
+
+      // Find the admin for this organization
+      const { data: adminData, error: adminError } = await supabase
+        .from('users')
+        .select('id, name')
+        .eq('organization_id', userData.organization_id)
+        .in('role', ['admin', 'superadmin'])
+        .limit(1);
+
+      if (adminError) {
+        console.error('Admin lookup error:', adminError);
+        throw new Error(`Failed to find organization admin: ${adminError.message}`);
+      }
+      
+      if (!adminData || adminData.length === 0) {
+        throw new Error('No admin found for your organization. Please contact your system administrator.');
+      }
+
+      const adminId = adminData[0].id;
+
       // Check if it's a post facto request
       const requestDate = new Date(formData.start_date);
       const today = new Date();
       const isPostFacto = requestDate < today;
 
-      // Create task as leave request
+      // Create task assigned to admin for approval
       const { error: taskError } = await supabase
         .from('tasks')
         .insert([
           {
-            title: `${formData.leave_type.replace('_', ' ').toUpperCase()} Leave Request${isPostFacto ? ' (Post Facto)' : ''}`,
-            description: formData.reason,
-            assigned_to: userId,
-            created_by: userId,
-            task_type: formData.leave_type === 'early_departure' ? 'early_departure' : 'leave_request',
-            priority: formData.is_emergency ? 'high' : 'medium',
+            title: `Leave Request: ${userData.name} - ${formData.leave_type.replace('_', ' ').toUpperCase()}${isPostFacto ? ' (Post Facto)' : ''}`,
+            description: `LEAVE REQUEST DETAILS:
+Employee: ${userData.name}
+Department: ${userData.department}
+Leave Type: ${formData.leave_type.replace('_', ' ').toUpperCase()}
+Start Date: ${formData.start_date}${formData.end_date ? `\nEnd Date: ${formData.end_date}` : ''}
+Reason: ${formData.reason}
+Emergency: ${formData.is_emergency ? 'YES' : 'NO'}
+${isPostFacto ? 'POST FACTO REQUEST: This leave has already been taken' : ''}
+
+Please review and approve/reject this leave request.`,
+            assigned_to: adminId, // Assign to admin for approval
+            created_by: userData.id, // Track who created the request - use database user ID
+            type: 'personalTask', // Use valid task type for leave requests
+            priority: formData.is_emergency ? 'critical' : isPostFacto ? 'moderate' : 'lessImportant',
             status: 'pending',
-            due_date: formData.start_date,
-            estimated_hours: formData.leave_type === 'full_day' ? 8 : formData.leave_type === 'half_day' ? 4 : 2
+            due_date: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // Admin has 24 hours to respond
+            hours_to_complete: 1 // Time for admin to review
           }
         ]);
 
@@ -217,33 +279,63 @@ const LeaveManagement: React.FC<{ userId: string; isAdmin?: boolean }> = ({
     try {
       setLoading(true);
       
+      // First get the current user's database ID
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('auth_id', userId)
+        .maybeSingle();
+
+      if (userError || !userData) {
+        console.error('Error fetching user data:', userError);
+        return;
+      }
+
+      const dbUserId = userData.id;
+      
       let query = supabase
         .from('tasks')
         .select('*')
-        .in('task_type', ['leave_request', 'early_departure'])
+        .eq('type', 'personalTask')
+        .ilike('title', '%Leave Request%') // Filter by title to identify leave requests
         .order('created_at', { ascending: false });
 
-      if (!isAdmin) {
-        query = query.eq('assigned_to', userId);
+      if (isAdmin) {
+        // Admin sees leave requests assigned to them (for approval) AND requests they created
+        query = query.or(`assigned_to.eq.${dbUserId},created_by.eq.${dbUserId}`);
+      } else {
+        // Regular users see leave requests they created
+        query = query.eq('created_by', dbUserId);
       }
 
       const { data, error } = await query;
       if (error) throw error;
 
       const formattedRequests: ExistingLeaveRequest[] = (data || []).map(request => {
-        const isPostFacto = new Date(request.created_at) > new Date(request.due_date);
+        // Parse metadata if available
+        let metadata: LeaveRequestMetadata = {};
+        try {
+          metadata = request.metadata ? JSON.parse(request.metadata) : {};
+        } catch (e) {
+          // If parsing fails, use legacy format
+        }
+
+        const isPostFacto = metadata.is_post_facto || 
+                           (new Date(request.created_at) > new Date(metadata.start_date || request.due_date));
         
         return {
           id: request.id,
-          leave_type: request.task_type,
-          start_date: request.due_date,
-          end_date: request.estimated_hours > 8 ? request.due_date : undefined, // Multi-day logic
-          reason: request.description || '',
+          leave_type: metadata.leave_type || 'full_day', // Default to full_day if metadata missing
+          start_date: metadata.start_date || request.due_date,
+          end_date: metadata.end_date,
+          reason: metadata.reason || request.description || '',
           status: request.status === 'completed' ? 'approved' : 
                   request.status === 'cancelled' ? 'rejected' : 'pending',
           is_post_facto: isPostFacto,
           requested_at: request.created_at,
-          comments: request.title
+          comments: request.title,
+          employee_name: metadata.employee_name,
+          employee_department: metadata.employee_department
         };
       });
 
@@ -261,6 +353,27 @@ const LeaveManagement: React.FC<{ userId: string; isAdmin?: boolean }> = ({
       case 'rejected': return 'bg-red-100 text-red-800';
       case 'pending': return 'bg-yellow-100 text-yellow-800';
       default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const handleLeaveApproval = async (requestId: string, action: 'approve' | 'reject', comments?: string) => {
+    try {
+      const status = action === 'approve' ? 'completed' : 'cancelled';
+      const { error } = await supabase
+        .from('tasks')
+        .update({ 
+          status,
+          completed_at: action === 'approve' ? new Date().toISOString() : null,
+          title: `${action === 'approve' ? 'APPROVED' : 'REJECTED'}: ${comments || (action === 'approve' ? 'Leave request approved' : 'Leave request denied')}`
+        })
+        .eq('id', requestId);
+
+      if (error) throw error;
+      
+      // Refresh the list
+      await fetchLeaveRequests();
+    } catch (error) {
+      console.error('Error updating leave request:', error);
     }
   };
 
@@ -286,17 +399,19 @@ const LeaveManagement: React.FC<{ userId: string; isAdmin?: boolean }> = ({
         <div className="flex justify-between items-center mb-6">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Leave Management</h1>
-            <p className="text-gray-600">Manage your leave requests and view history</p>
+            <p className="text-gray-600">
+              {isAdmin 
+                ? 'Review and approve leave requests from employees, and manage your own leave requests' 
+                : 'Manage your leave requests and view history'}
+            </p>
           </div>
-          {!isAdmin && (
-            <button
-              onClick={() => setShowForm(true)}
-              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-            >
-              <HiPlus className="w-4 h-4 mr-2" />
-              Request Leave
-            </button>
-          )}
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+          >
+            <HiPlus className="w-4 h-4 mr-2" />
+            Request Leave
+          </button>
         </div>
 
         {/* Summary Cards */}
@@ -372,6 +487,11 @@ const LeaveManagement: React.FC<{ userId: string; isAdmin?: boolean }> = ({
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
+                  {isAdmin && (
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Employee
+                    </th>
+                  )}
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Leave Details
                   </th>
@@ -387,11 +507,28 @@ const LeaveManagement: React.FC<{ userId: string; isAdmin?: boolean }> = ({
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Requested
                   </th>
+                  {isAdmin && (
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {filteredRequests.map((request) => (
                   <tr key={request.id} className="hover:bg-gray-50">
+                    {isAdmin && (
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div>
+                          <div className="text-sm font-medium text-gray-900">
+                            {request.employee_name || 'Unknown'}
+                          </div>
+                          <div className="text-sm text-gray-500">
+                            {request.employee_department || 'Unknown Dept'}
+                          </div>
+                        </div>
+                      </td>
+                    )}
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         <div>
@@ -427,6 +564,30 @@ const LeaveManagement: React.FC<{ userId: string; isAdmin?: boolean }> = ({
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {new Date(request.requested_at).toLocaleDateString()}
                     </td>
+                    {isAdmin && (
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        {request.status === 'pending' ? (
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={() => handleLeaveApproval(request.id, 'approve')}
+                              className="text-green-600 hover:text-green-900 flex items-center"
+                              title="Approve"
+                            >
+                              <HiCheck className="w-5 h-5" />
+                            </button>
+                            <button
+                              onClick={() => handleLeaveApproval(request.id, 'reject')}
+                              className="text-red-600 hover:text-red-900 flex items-center"
+                              title="Reject"
+                            >
+                              <HiX className="w-5 h-5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

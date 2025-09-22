@@ -3,17 +3,27 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+// Debug environment variables
+console.log('Environment debug:', {
+  url: supabaseUrl,
+  keyLength: supabaseAnonKey?.length || 0,
+  hasUrl: !!supabaseUrl,
+  hasKey: !!supabaseAnonKey
+});
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('Missing Supabase environment variables!', {
+    VITE_SUPABASE_URL: supabaseUrl,
+    VITE_SUPABASE_ANON_KEY: supabaseAnonKey ? `${supabaseAnonKey.substring(0, 10)}...` : 'undefined'
+  });
+}
+
 // Create a Supabase client with automatic retries
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true
-  },
-  global: {
-    headers: {
-      'x-application-name': 'healthcare-task-manager'
-    }
   },
   db: {
     schema: 'public'
@@ -24,6 +34,12 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     }
   }
 });
+
+// Make supabase available globally for debugging
+if (typeof window !== 'undefined') {
+  (window as any).supabase = supabase;
+  console.log('Supabase client attached to window object');
+}
 
 // Add a helper function to handle retries
 function isErrorWithMessage(error: any): error is { message: string } {

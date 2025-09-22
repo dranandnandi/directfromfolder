@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase, retryOperation } from './utils/supabaseClient';
 import LoginForm from './components/auth/LoginForm';
 import Sidebar from './components/Sidebar';
-import Dashboard from './components/Dashboard';
+import DashboardContainer from './components/DashboardContainer';
 import Header from './components/Header';
 import { lazy, Suspense } from 'react';
 import ConversationDashboard from './components/ConversationDashboard';
@@ -16,6 +16,7 @@ const RecurringTasksManager = lazy(() => import('./components/RecurringTasksMana
 const PerformanceReports = lazy(() => import('./components/PerformanceReports'));
 const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
 const LeaveManagement = lazy(() => import('./components/LeaveManagement'));
+const PunchInOut = lazy(() => import('./components/hr/PunchInOut'));
 import { Task, TaskType, User, OrganizationSettings, TaskStatus, TaskPriority } from './models/task';
 
 // Define interfaces for raw Supabase response data
@@ -791,7 +792,7 @@ function App() {
           contact_number: task.contactNumber,
           manual_whatsapp_number: task.manualWhatsappNumber,
           hours_to_complete: task.hoursToComplete,
-          created_by: session?.user?.id,
+          created_by: userId, // Use database user ID instead of auth ID
         } as const));
 
         if (editingTask) {
@@ -880,8 +881,17 @@ function App() {
     setSelectedTaskType(type);
     setShowTaskModal(true);
   };
-  // Add selectedTask state for TaskDetailsModal
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+
+  const handleRefreshTasks = async () => {
+    try {
+      await Promise.all([
+        fetchTasks(),
+        fetchPersonalTasks()
+      ]);
+    } catch (error) {
+      console.error('Error refreshing tasks:', error);
+    }
+  };
 
   if (loading) {
     return (
@@ -944,14 +954,14 @@ function App() {
         );
       case 'conversations':
         return (
-          <Suspense fallback={<div className="p-4">Loading conversation monitoring...</div>}>
-            <ConversationDashboard isAdmin={userRole === 'admin' || userRole === 'superadmin'} />
+          <Suspense fallback={<div className="p-4">Loading conversation dashboard...</div>}>
+            <ConversationDashboard />
           </Suspense>
         );
       case 'adminDashboard':
         return (
           <Suspense fallback={<div className="p-4">Loading admin dashboard...</div>}>
-            <AdminDashboard />
+            <AdminDashboard adminUserId={session?.user?.id || ''} />
           </Suspense>
         );
       case 'leaveManagement':
@@ -960,17 +970,22 @@ function App() {
             <LeaveManagement userId={session?.user?.id} isAdmin={userRole === 'admin' || userRole === 'superadmin'} />
           </Suspense>
         );
+      case 'attendance':
+        return (
+          <Suspense fallback={<div className="p-4">Loading attendance...</div>}>
+            <PunchInOut />
+          </Suspense>
+        );
       default:
         return (
-          <Dashboard 
+          <DashboardContainer 
             currentUserId={session?.user?.id}
             tasks={tasks} 
             personalTasks={personalTasks}
             onAddTask={handleAddTaskClick}
             onEditTask={handleEditTask}
+            onTaskUpdate={handleRefreshTasks}
             teamMembers={teamMembers}
-            selectedTask={selectedTask}
-            setSelectedTask={setSelectedTask}
           />
         );
     }

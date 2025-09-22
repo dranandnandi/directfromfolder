@@ -12,12 +12,14 @@ interface DashboardProps {
   personalTasks: Task[];
   onAddTask: (type: TaskType) => void;
   onEditTask: (task: Task) => void;
+  onTaskUpdate?: () => void;
   teamMembers: User[];
   selectedTask: Task | null;
   setSelectedTask: (task: Task | null) => void;
 }
 
 type FilterType = 'all' | 'overdue' | 'due-tomorrow' | 'upcoming' | 'completed' | 'regular' | 'sample-tracking' | 'quality-control' | 'personal';
+type StatusFilterType = 'all-status' | 'new' | 'inProgress' | 'completed' | 'overdue';
 
 const SummaryCard = ({ icon: Icon, title, value, color, subtitle, onClick }: any) => (
   <div 
@@ -51,9 +53,11 @@ const generateWhatsAppLink = (phoneNumber: string, message: string) => {
   return `${baseURL}?phone=91${formattedNumber}&text=${encodedMessage}`;
 };
 
-const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTasks, onAddTask, onEditTask, teamMembers, selectedTask, setSelectedTask }) => {
+const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTasks, onAddTask, onEditTask, onTaskUpdate, teamMembers, selectedTask, setSelectedTask }) => {
   const [filterType, setFilterType] = useState<FilterType>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilterType>('all-status');
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
+  const [showStatusFilterDropdown, setShowStatusFilterDropdown] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const previousTasksRef = useRef<Task[]>([]);
   const previousPersonalTasksRef = useRef<Task[]>([]);
@@ -84,6 +88,20 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
       previousPersonalTasksRef.current = personalTasks;
     }
   }, [tasks, personalTasks]);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest('[data-dropdown]')) {
+        setShowFilterDropdown(false);
+        setShowStatusFilterDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleWhatsAppClick = async (task: Task, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -160,7 +178,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
 
       let dueDate = 'upcoming';
       
-      if (task.type === TaskType.ClinicalRound) {
+      if (task.type === TaskType.PatientTracking) {
         const createdDate = new Date(task.createdAt);
         const hoursToAdd = task.hoursToComplete || 4;
         const dueTime = new Date(createdDate.getTime() + hoursToAdd * 60 * 60 * 1000);
@@ -212,6 +230,24 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
       );
     }
     
+    // Apply status filter
+    if (statusFilter !== 'all-status') {
+      allTasks = allTasks.filter(task => {
+        switch (statusFilter) {
+          case 'new':
+            return task.status === 'new';
+          case 'inProgress':
+            return task.status === 'inProgress';
+          case 'completed':
+            return task.status === 'completed';
+          case 'overdue':
+            return task.status === 'overdue';
+          default:
+            return true;
+        }
+      });
+    }
+    
     const grouped = groupTasks(allTasks);
     
     // Only log when debugging is needed
@@ -227,11 +263,11 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
       case 'completed':
         return { completed: grouped.completed };
       case 'regular':
-        return groupTasks(allTasks.filter(t => t.type === TaskType.QuickAdvisory));
+        return groupTasks(allTasks.filter(t => t.type === TaskType.RegularTask));
       case 'sample-tracking':
-        return groupTasks(allTasks.filter(t => t.type === TaskType.ClinicalRound));
+        return groupTasks(allTasks.filter(t => t.type === TaskType.PatientTracking));
       case 'quality-control':
-        return groupTasks(allTasks.filter(t => t.type === TaskType.FollowUp));
+        return groupTasks(allTasks.filter(t => t.type === TaskType.AuditTask));
       case 'personal':
         return groupTasks(allTasks.filter(t => t.type === TaskType.PersonalTask));
       default:
@@ -240,7 +276,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
   }; 
 
   // Memoize the filtered tasks to prevent unnecessary recalculations
-  const filteredTaskGroups = useMemo(() => getFilteredTasks(), [tasks, personalTasks, filterType, searchTerm]);
+  const filteredTaskGroups = useMemo(() => getFilteredTasks(), [tasks, personalTasks, filterType, statusFilter, searchTerm]);
 
   const getTaskCounts = () => {
     const allTasks = [...tasks, ...personalTasks];
@@ -325,15 +361,15 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
               <span className={clsx(
                 'px-2 py-1 rounded-full text-xs font-medium',
                 {
-                  'bg-purple-100 text-purple-700': task.type === TaskType.QuickAdvisory,
-                  'bg-blue-100 text-blue-700': task.type === TaskType.ClinicalRound,
-                  'bg-green-100 text-green-700': task.type === TaskType.FollowUp,
+                  'bg-purple-100 text-purple-700': task.type === TaskType.RegularTask,
+                  'bg-blue-100 text-blue-700': task.type === TaskType.PatientTracking,
+                  'bg-green-100 text-green-700': task.type === TaskType.AuditTask,
                   'bg-gray-100 text-gray-700': task.type === TaskType.PersonalTask
                 }
               )}>
-                {task.type === TaskType.QuickAdvisory && 'Regular Task'}
-                {task.type === TaskType.ClinicalRound && 'Patient Tracking'}
-                {task.type === TaskType.FollowUp && 'Audit Task'}
+                {task.type === TaskType.RegularTask && 'Regular Task'}
+                {task.type === TaskType.PatientTracking && 'Patient Tracking'}
+                {task.type === TaskType.AuditTask && 'Audit Task'}
                 {task.type === TaskType.PersonalTask && 'Personal'}
               </span>
             </div>
@@ -350,13 +386,13 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
             )}
           </div>
 
-          {(task.type === TaskType.ClinicalRound && task.hoursToComplete) && (
+          {(task.type === TaskType.PatientTracking && task.hoursToComplete) && (
             <div className="text-xs text-orange-600 mt-2 flex items-center gap-1">
               <HiClock className="w-3 h-3" />
               Complete within: {task.hoursToComplete} hours
             </div>
           )}
-          {(task.type === TaskType.QuickAdvisory || task.type === TaskType.FollowUp) && task.dueDate && (
+          {(task.type === TaskType.RegularTask || task.type === TaskType.AuditTask) && task.dueDate && (
             <div className="text-xs text-orange-600 mt-2 flex items-center gap-1">
               <HiCalendar className="w-3 h-3" />
               Due: {new Date(task.dueDate).toLocaleDateString()} at {new Date(task.dueDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -391,9 +427,9 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
     { value: 'due-tomorrow', label: 'Due Tomorrow', count: counts.dueTomorrow },
     { value: 'upcoming', label: 'Upcoming', count: counts.upcoming },
     { value: 'completed', label: 'Completed', count: counts.completed },
-    { value: 'regular', label: 'Regular Tasks', count: tasks.filter(t => t.type === TaskType.QuickAdvisory).length },
-    { value: 'sample-tracking', label: 'Patient Tracking', count: tasks.filter(t => t.type === TaskType.ClinicalRound).length },
-    { value: 'quality-control', label: 'Audit Task', count: tasks.filter(t => t.type === TaskType.FollowUp).length },
+    { value: 'regular', label: 'Regular Tasks', count: tasks.filter(t => t.type === TaskType.RegularTask).length },
+    { value: 'sample-tracking', label: 'Patient Tracking', count: tasks.filter(t => t.type === TaskType.PatientTracking).length },
+    { value: 'quality-control', label: 'Audit Task', count: tasks.filter(t => t.type === TaskType.AuditTask).length },
     { value: 'personal', label: 'Personal Tasks', count: personalTasks.length }
   ];
 
@@ -473,21 +509,21 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
           <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
             <div className="flex flex-wrap gap-2">
               <button 
-                onClick={() => onAddTask(TaskType.QuickAdvisory)}
+                onClick={() => onAddTask(TaskType.RegularTask)}
                 className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 transition-colors shadow-sm"
               >
                 <HiPlus className="w-4 h-4" />
                 Add Regular Task
               </button>
               <button 
-                onClick={() => onAddTask(TaskType.ClinicalRound)}
+                onClick={() => onAddTask(TaskType.PatientTracking)}
                 className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2 transition-colors shadow-sm"
               >
                 <HiPlus className="w-4 h-4" />
                 Patient Tracking
               </button>
               <button 
-                onClick={() => onAddTask(TaskType.FollowUp)}
+                onClick={() => onAddTask(TaskType.AuditTask)}
                 className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center gap-2 transition-colors shadow-sm"
               >
                 <HiPlus className="w-4 h-4" />
@@ -516,7 +552,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
               </div>
 
               {/* Filter Dropdown */}
-              <div className="relative">
+              <div className="relative" data-dropdown>
                 <button
                   onClick={() => setShowFilterDropdown(!showFilterDropdown)}
                   className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
@@ -547,6 +583,89 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
                           <span className="text-gray-500">({option.count})</span>
                         </button>
                       ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Status Filter Dropdown */}
+              <div className="relative" data-dropdown>
+                <button
+                  onClick={() => setShowStatusFilterDropdown(!showStatusFilterDropdown)}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  <span className="text-sm font-medium">
+                    {statusFilter === 'all-status' ? 'All Status' : 
+                     statusFilter === 'new' ? 'New' :
+                     statusFilter === 'inProgress' ? 'In Progress' :
+                     statusFilter === 'completed' ? 'Completed' : 'Overdue'}
+                  </span>
+                  <HiChevronDown className="w-4 h-4" />
+                </button>
+
+                {showStatusFilterDropdown && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-20">
+                    <div className="py-2">
+                      <button
+                        onClick={() => {
+                          setStatusFilter('all-status');
+                          setShowStatusFilterDropdown(false);
+                        }}
+                        className={clsx(
+                          'w-full text-left px-4 py-2 text-sm hover:bg-gray-50 transition-colors',
+                          statusFilter === 'all-status' && 'bg-blue-50 text-blue-700'
+                        )}
+                      >
+                        All Status
+                      </button>
+                      <button
+                        onClick={() => {
+                          setStatusFilter('new');
+                          setShowStatusFilterDropdown(false);
+                        }}
+                        className={clsx(
+                          'w-full text-left px-4 py-2 text-sm hover:bg-gray-50 transition-colors',
+                          statusFilter === 'new' && 'bg-blue-50 text-blue-700'
+                        )}
+                      >
+                        New
+                      </button>
+                      <button
+                        onClick={() => {
+                          setStatusFilter('inProgress');
+                          setShowStatusFilterDropdown(false);
+                        }}
+                        className={clsx(
+                          'w-full text-left px-4 py-2 text-sm hover:bg-gray-50 transition-colors',
+                          statusFilter === 'inProgress' && 'bg-blue-50 text-blue-700'
+                        )}
+                      >
+                        In Progress
+                      </button>
+                      <button
+                        onClick={() => {
+                          setStatusFilter('completed');
+                          setShowStatusFilterDropdown(false);
+                        }}
+                        className={clsx(
+                          'w-full text-left px-4 py-2 text-sm hover:bg-gray-50 transition-colors',
+                          statusFilter === 'completed' && 'bg-blue-50 text-blue-700'
+                        )}
+                      >
+                        Completed
+                      </button>
+                      <button
+                        onClick={() => {
+                          setStatusFilter('overdue');
+                          setShowStatusFilterDropdown(false);
+                        }}
+                        className={clsx(
+                          'w-full text-left px-4 py-2 text-sm hover:bg-gray-50 transition-colors',
+                          statusFilter === 'overdue' && 'bg-blue-50 text-blue-700'
+                        )}
+                      >
+                        Overdue
+                      </button>
                     </div>
                   </div>
                 )}
@@ -604,6 +723,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
           onClose={() => setSelectedTask(null)}
           task={selectedTask}
           onEditTask={onEditTask}
+          onTaskUpdate={onTaskUpdate}
           teamMembers={teamMembers}
         />
       )}

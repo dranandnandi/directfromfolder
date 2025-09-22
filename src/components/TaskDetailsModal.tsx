@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { HiX, HiPencil, HiPhone, HiPlus, HiChevronDown, HiChevronRight, HiMicrophone } from 'react-icons/hi';
+import { HiX, HiPencil, HiPhone, HiPlus, HiChevronDown, HiChevronRight } from 'react-icons/hi';
 import { FaWhatsapp } from 'react-icons/fa';
-import { Task, User, QualityControlEntry, TaskType } from '../models/task';
+import { Task, User, QualityControlEntry, TaskType, TaskStatus } from '../models/task';
 import { supabase } from '../utils/supabaseClient';
 import clsx from 'clsx';
 import { generateWhatsAppMessage } from '../utils/aiUtils';
 import AddQualityEntryModal from './AddQualityEntryModal';
-import ConversationRecorder from './ConversationRecorder';
+// import ConversationRecorder from './SimplifiedConversationRecorder';
 
 interface TaskMessage {
   id: string;
@@ -31,6 +31,7 @@ interface TaskDetailsModalProps {
   task: Task;
   onEditTask: (task: Task) => void;
   teamMembers: User[];
+  onTaskUpdate?: () => void;
 }
 
 interface GroupedActivityLog {
@@ -122,7 +123,8 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
   isOpen,
   onClose,
   task,
-  onEditTask
+  onEditTask,
+  onTaskUpdate
 }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'messages' | 'activity' | 'quality' | 'conversations'>('overview');
   const [messages, setMessages] = useState<TaskMessage[]>([]);
@@ -133,10 +135,13 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
   const [showAddQualityEntryModal, setShowAddQualityEntryModal] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [activityFilter, setActivityFilter] = useState('');
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  // const [currentUserId, setCurrentUserId] = useState<string | null>(null); // Hidden with conversation recording
 
   useEffect(() => {
     if (isOpen) {
+      console.log('TaskDetailsModal - Task object:', task);
+      console.log('TaskDetailsModal - Due date:', task.dueDate);
+      console.log('TaskDetailsModal - Due date type:', typeof task.dueDate);
       fetchMessages();
       fetchActivityLogs();
       fetchQualityEntries();
@@ -155,7 +160,7 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
           .single();
         
         if (userData) {
-          setCurrentUserId(userData.id);
+          // setCurrentUserId(userData.id); // Hidden with conversation recording
         }
       }
     } catch (error) {
@@ -217,6 +222,35 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
       setQualityEntries(data || []);
     } catch (error) {
       console.error('Error fetching quality entries:', error);
+    }
+  };
+
+  const handleTaskStatusUpdate = async (newStatus: TaskStatus) => {
+    try {
+      setLoading(true);
+      
+      // Update task in the database
+      const { error } = await supabase
+        .from('tasks')
+        .update({ 
+          status: newStatus,
+          completed_at: newStatus === TaskStatus.Completed ? new Date().toISOString() : null
+        })
+        .eq('id', task.id);
+
+      if (error) throw error;
+
+      // Call the optional onTaskUpdate callback if provided to refresh tasks
+      if (onTaskUpdate) {
+        await onTaskUpdate();
+      }
+
+      // Close the modal after successful update
+      onClose();
+    } catch (error) {
+      console.error('Error updating task status:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -393,14 +427,16 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
 
   return (
     <>
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg w-full max-w-4xl max-h-[90vh] overflow-hidden">
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-end sm:items-center justify-center z-50">
+        <div className="bg-white rounded-t-lg sm:rounded-lg w-full sm:max-w-4xl max-h-[95vh] sm:max-h-[90vh] overflow-hidden">
           {/* Header */}
-          <div className="p-4 border-b flex justify-between items-center">
-            <h3 className="text-lg font-semibold">{task.title}</h3>
-            <div className="flex items-center gap-2">
+          <div className="p-4 sm:p-6 border-b flex justify-between items-start">
+            <div className="flex-1 pr-4">
+              <h3 className="text-lg sm:text-xl font-semibold text-gray-900 leading-tight">{task.title}</h3>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
               {/* Add Quality Entry Button */}
-              {task.type === TaskType.FollowUp && (
+              {task.type === TaskType.AuditTask && (
                 <button
                   onClick={() => setShowAddQualityEntryModal(true)}
                   className="px-3 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 flex items-center gap-1"
@@ -410,15 +446,15 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                   Add Quality Entry
                 </button>
               )}
-              {/* Add Conversation Recording Button */}
-              <button
+              {/* Add Conversation Recording Button - Hidden temporarily */}
+              {/* <button
                 onClick={() => setActiveTab('conversations')}
                 className="px-3 py-1 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 flex items-center gap-1"
                 title="Record Conversation"
               >
                 <HiMicrophone className="w-4 h-4" />
                 Record Conversation
-              </button>
+              </button> */}
               <button onClick={onClose}>
                 <HiX className="w-6 h-6" />
               </button>
@@ -427,10 +463,10 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
 
           {/* Tabs */}
           <div className="border-b">
-            <div className="flex">
+            <div className="flex overflow-x-auto">
               <button
                 className={clsx(
-                  'px-4 py-2 text-sm font-medium border-b-2',
+                  'px-3 sm:px-4 py-2 text-sm font-medium border-b-2 flex-shrink-0',
                   activeTab === 'overview'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -441,7 +477,7 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
               </button>
               <button
                 className={clsx(
-                  'px-4 py-2 text-sm font-medium border-b-2',
+                  'px-3 sm:px-4 py-2 text-sm font-medium border-b-2 flex-shrink-0',
                   activeTab === 'messages'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -452,7 +488,7 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
               </button>
               <button
                 className={clsx(
-                  'px-4 py-2 text-sm font-medium border-b-2',
+                  'px-3 sm:px-4 py-2 text-sm font-medium border-b-2 flex-shrink-0',
                   activeTab === 'activity'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -461,22 +497,22 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
               >
                 Activity
               </button>
-              {task.type === TaskType.FollowUp && (
+              {task.type === TaskType.AuditTask && (
                 <button
                   className={clsx(
-                    'px-4 py-2 text-sm font-medium border-b-2',
+                    'px-3 sm:px-4 py-2 text-sm font-medium border-b-2 flex-shrink-0',
                     activeTab === 'quality'
                       ? 'border-blue-500 text-blue-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700'
                   )}
                   onClick={() => setActiveTab('quality')}
                 >
-                  Quality Control
+                  Quality
                 </button>
               )}
               <button
                 className={clsx(
-                  'px-4 py-2 text-sm font-medium border-b-2',
+                  'px-3 sm:px-4 py-2 text-sm font-medium border-b-2 flex-shrink-0',
                   activeTab === 'conversations'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -489,23 +525,23 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
           </div>
 
           {/* Content */}
-          <div className="p-4">
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1">
             {activeTab === 'overview' && (
               <div className="space-y-4">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="text-sm text-gray-500">{task.description}</p>
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
+                  <div className="flex-1">
+                    <p className="text-sm sm:text-base text-gray-600 mb-3">{task.description}</p>
                     {task.assignees?.[0] && (
-                      <div className="mt-2">
+                      <div className="mb-3">
                         <span className="text-sm font-medium">Assigned to: </span>
                         <span className="text-sm text-purple-600">{task.assignees[0].name}</span>
                       </div>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-3 sm:gap-2 justify-start sm:justify-end">
                     <button
                       onClick={() => onEditTask(task)}
-                      className="p-2 hover:bg-gray-100 rounded-full"
+                      className="p-2 hover:bg-gray-100 rounded-full flex-shrink-0"
                       title="Edit task"
                     >
                       <HiPencil className="w-5 h-5 text-gray-500" />
@@ -531,14 +567,14 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                   <div>
-                    <h4 className="font-medium mb-2">Details</h4>
-                    <div className="space-y-2">
-                      <div>
-                        <span className="text-sm text-gray-500">Status: </span>
+                    <h4 className="font-medium mb-3 text-base">Details</h4>
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-600">Status:</span>
                         <span className={clsx(
-                          'px-2 py-1 rounded-full text-xs',
+                          'px-2 py-1 rounded-full text-xs font-medium',
                           {
                             'bg-gray-100 text-gray-800': task.status === 'new',
                             'bg-blue-100 text-blue-800': task.status === 'inProgress',
@@ -549,10 +585,10 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                           {task.status}
                         </span>
                       </div>
-                      <div>
-                        <span className="text-sm text-gray-500">Priority: </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-600">Priority:</span>
                         <span className={clsx(
-                          'px-2 py-1 rounded-full text-xs',
+                          'px-2 py-1 rounded-full text-xs font-medium',
                           {
                             'bg-red-100 text-red-800': task.priority === 'critical',
                             'bg-yellow-100 text-yellow-800': task.priority === 'moderate',
@@ -562,14 +598,20 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                           {task.priority}
                         </span>
                       </div>
-                      {task.dueDate && (
-                        <div>
-                          <span className="text-sm text-gray-500">Due Date: </span>
-                          <span className="text-sm">
-                            {new Date(task.dueDate).toLocaleString()}
-                          </span>
+                      <div>
+                        <span className="text-sm font-medium text-gray-600">Due Date:</span>
+                        <div className="text-sm mt-1">
+                          {task.dueDate ? (
+                            <span className="text-gray-900">{new Date(task.dueDate).toLocaleString()}</span>
+                          ) : (
+                            <span className="text-gray-400 italic">Not set</span>
+                          )}
                         </div>
-                      )}
+                        {/* Debug info - remove in production */}
+                        <div className="text-xs text-gray-400 mt-1">
+                          Debug: {task.dueDate ? `${task.dueDate} (${typeof task.dueDate})` : 'undefined/null'}
+                        </div>
+                      </div>
                       {task.patientId && (
                         <div>
                           <span className="text-sm text-gray-500">Patient ID: </span>
@@ -579,17 +621,17 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Type-specific details - Only show location for ClinicalRound */}
+                  {/* Type-specific details - Only show location for PatientTracking */}
                   <div>
                     <h4 className="font-medium mb-2">Additional Information</h4>
                     <div className="space-y-2">
-                      {task.type === TaskType.ClinicalRound && task.location && (
+                      {task.type === TaskType.PatientTracking && task.location && (
                         <div>
                           <span className="text-sm text-gray-500">Location: </span>
                           <span className="text-sm">{task.location}</span>
                         </div>
                       )}
-                      {task.type === TaskType.ClinicalRound && task.hoursToComplete && (
+                      {task.type === TaskType.PatientTracking && task.hoursToComplete && (
                         <div>
                           <span className="text-sm text-gray-500">Complete within: </span>
                           <span className="text-sm">{task.hoursToComplete} hours</span>
@@ -808,13 +850,13 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
               </div>
             )}
 
-            {activeTab === 'quality' && task.type === TaskType.FollowUp && (
+            {activeTab === 'quality' && task.type === TaskType.AuditTask && (
               <div className="space-y-6">
                 {/* Quality Control Entries List */}
                 <div>
                   <div className="flex justify-between items-center mb-4">
                     <h4 className="font-medium">Quality Control History</h4>
-                    {task.type === TaskType.FollowUp && (
+                    {task.type === TaskType.AuditTask && (
                       <button
                         onClick={() => setShowAddQualityEntryModal(true)}
                         className="px-3 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 flex items-center gap-1"
@@ -872,20 +914,48 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
             )}
           </div>
           
-          {/* Conversations Tab */}
-          {activeTab === 'conversations' && currentUserId && (
+          {/* Conversations Tab - Hidden temporarily */}
+          {/* {activeTab === 'conversations' && currentUserId && (
             <div className="space-y-4">
               <ConversationRecorder 
-                taskId={task.id}
                 customerIdentifier={task.patientId}
               />
             </div>
-          )}
+          )} */}
         </div>
+
+        {/* Action Buttons Footer */}
+        {task.status !== TaskStatus.Completed && (
+          <div className="border-t bg-gray-50 px-4 sm:px-6 py-4">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+              <div className="text-sm text-gray-600">
+                Status: <span className="capitalize font-medium">{task.status}</span>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                {task.status === TaskStatus.New && (
+                  <button
+                    onClick={() => handleTaskStatusUpdate(TaskStatus.InProgress)}
+                    disabled={loading}
+                    className="px-4 py-3 sm:py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium w-full sm:w-auto"
+                  >
+                    {loading ? 'Updating...' : 'Start Task'}
+                  </button>
+                )}
+                <button
+                  onClick={() => handleTaskStatusUpdate(TaskStatus.Completed)}
+                  disabled={loading}
+                  className="px-4 py-3 sm:py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium w-full sm:w-auto"
+                >
+                  {loading ? 'Updating...' : 'Mark Complete'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Add Quality Entry Modal */}
-      {task.type === TaskType.FollowUp && (
+      {task.type === TaskType.AuditTask && (
         <AddQualityEntryModal
           isOpen={showAddQualityEntryModal}
           onClose={() => setShowAddQualityEntryModal(false)}

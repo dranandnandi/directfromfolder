@@ -19,3 +19,36 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Capacitor and Task Manager specific rules
+-keep class com.getcapacitor.** { *; }
+-keep class com.dcptaskmanagmentapp.taskmanager.** { *; }
+
+# Firebase rules
+-keepclassmembers class com.google.firebase.** { *; }
+-keep class com.google.android.gms.** { *; }
+
+# Notification classes
+-keep class androidx.core.app.NotificationCompat** { *; }
+-keep class android.app.NotificationManager** { *; }
+
+# Supabase client rules (for JavaScript bridge)
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+
+# Keep WebView related classes
+-keepclassmembers class * extends android.webkit.WebViewClient {
+    public void *(android.webkit.WebView, java.lang.String, android.graphics.Bitmap);
+    public boolean *(android.webkit.WebView, java.lang.String);
+}
+
+# Preserve notification and task related data models
+-keepclassmembers class * {
+    private static final long serialVersionUID;
+    private static final java.io.ObjectStreamField[] serialPersistentFields;
+    private void writeObject(java.io.ObjectOutputStream);
+    private void readObject(java.io.ObjectInputStream);
+    java.lang.Object writeReplace();
+    java.lang.Object readResolve();
+}

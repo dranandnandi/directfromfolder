@@ -7,9 +7,9 @@ export interface User {
 }
 
 export enum TaskType {
-  QuickAdvisory = 'quickAdvisory',
-  ClinicalRound = 'clinicalRound',
-  FollowUp = 'followUp',
+  RegularTask = 'regularTask',
+  PatientTracking = 'patientTracking', 
+  AuditTask = 'auditTask',
   PersonalTask = 'personalTask'
 }
 

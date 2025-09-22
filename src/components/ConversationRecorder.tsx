@@ -1,17 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { HiMicrophone, HiStop, HiPause, HiPlay, HiTrash, HiUpload, HiUser } from 'react-icons/hi';
+import React, { useState, useEffect, useRef } from 'react';
+import { HiMicrophone, HiStop, HiPause, HiPlay, HiTrash, HiUpload, HiUser, HiDocumentText } from 'react-icons/hi';
 import { useAudioRecorder, formatRecordingTime } from '../utils/audioRecorder';
 import { uploadConversationRecording } from '../utils/conversationUtils';
+import { ConversationTranscriber } from '../utils/voiceUtils';
 import { supabase } from '../utils/supabaseClient';
 
 interface ConversationRecorderProps {
-  taskId?: string;
   customerIdentifier?: string;
   onRecordingComplete?: (conversationLogId: string) => void;
 }
 
 const ConversationRecorder: React.FC<ConversationRecorderProps> = ({
-  taskId,
   customerIdentifier,
   onRecordingComplete
 }) => {
@@ -21,6 +20,44 @@ const ConversationRecorder: React.FC<ConversationRecorderProps> = ({
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  
+  // Real-time transcription state
+  const [realtimeTranscript, setRealtimeTranscript] = useState('');
+  const [isTranscriptionEnabled, setIsTranscriptionEnabled] = useState(false);
+  const [transcriptionSupported, setTranscriptionSupported] = useState(false);
+  const transcriber = useRef<ConversationTranscriber | null>(null);
+  
+  // Initialize transcription support check
+  useEffect(() => {
+    const checkTranscriptionSupport = () => {
+      const supported = 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
+      setTranscriptionSupported(supported);
+    };
+    checkTranscriptionSupport();
+  }, []);
+
+  // Initialize transcriber when enabled
+  useEffect(() => {
+    if (isTranscriptionEnabled && transcriptionSupported && !transcriber.current) {
+      try {
+        transcriber.current = new ConversationTranscriber(
+          (transcript, isComplete) => {
+            setRealtimeTranscript(transcript);
+            if (isComplete) {
+              console.log('Final transcript:', transcript);
+            }
+          },
+          (error) => {
+            console.error('Transcription error:', error);
+            setIsTranscriptionEnabled(false);
+          }
+        );
+      } catch (error) {
+        console.error('Failed to initialize transcriber:', error);
+        setTranscriptionSupported(false);
+      }
+    }
+  }, [isTranscriptionEnabled, transcriptionSupported]);
   
   // Use the audio recorder hook with VAD enabled
   const {
@@ -67,6 +104,45 @@ const ConversationRecorder: React.FC<ConversationRecorderProps> = ({
     fetchCurrentUser();
   }, []);
 
+  // Enhanced recording functions with transcription
+  const handleStartRecording = () => {
+    startRecording();
+    if (isTranscriptionEnabled && transcriber.current) {
+      transcriber.current.startTranscription();
+      setRealtimeTranscript('');
+    }
+  };
+
+  const handleStopRecording = () => {
+    stopRecording();
+    if (isTranscriptionEnabled && transcriber.current) {
+      const finalTranscript = transcriber.current.stopTranscription();
+      console.log('Recording stopped. Final transcript:', finalTranscript);
+    }
+  };
+
+  const handlePauseRecording = () => {
+    pauseRecording();
+    if (isTranscriptionEnabled && transcriber.current) {
+      transcriber.current.stopTranscription();
+    }
+  };
+
+  const handleResumeRecording = () => {
+    resumeRecording();
+    if (isTranscriptionEnabled && transcriber.current) {
+      transcriber.current.startTranscription();
+    }
+  };
+
+  const handleResetRecording = () => {
+    resetRecording();
+    if (transcriber.current) {
+      transcriber.current.stopTranscription();
+    }
+    setRealtimeTranscript('');
+  };
+
   // Function to handle upload
   const handleUpload = async () => {
     if (!audioBlob || !currentUserId) return;
@@ -88,8 +164,7 @@ const ConversationRecorder: React.FC<ConversationRecorderProps> = ({
       const { data, error } = await uploadConversationRecording(
         audioBlob,
         currentUserId,
-        customerId || undefined,
-        taskId
+        customerId || undefined
       );
       
       clearInterval(progressInterval);
@@ -124,6 +199,37 @@ const ConversationRecorder: React.FC<ConversationRecorderProps> = ({
     <div className="bg-white rounded-lg shadow-sm p-6 space-y-4">
       <h3 className="text-lg font-medium">Conversation Recorder</h3>
       
+      {/* Real-time Transcription Toggle */}
+      {transcriptionSupported && (
+        <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
+          <div className="flex items-center">
+            <HiDocumentText className="text-blue-600 mr-2" />
+            <span className="text-sm font-medium text-blue-800">Real-time Transcription</span>
+          </div>
+          <button
+            onClick={() => setIsTranscriptionEnabled(!isTranscriptionEnabled)}
+            disabled={isRecording}
+            className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+              isTranscriptionEnabled
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            } disabled:opacity-50`}
+          >
+            {isTranscriptionEnabled ? 'ON' : 'OFF'}
+          </button>
+        </div>
+      )}
+
+      {/* Real-time Transcript Display */}
+      {isTranscriptionEnabled && realtimeTranscript && (
+        <div className="p-3 bg-gray-50 rounded-lg border">
+          <h4 className="text-sm font-medium text-gray-700 mb-2">Live Transcript:</h4>
+          <div className="text-sm text-gray-600 max-h-32 overflow-y-auto">
+            {realtimeTranscript}
+          </div>
+        </div>
+      )}
+
       {/* Customer Identifier Input */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -153,7 +259,7 @@ const ConversationRecorder: React.FC<ConversationRecorderProps> = ({
       <div className="flex justify-center space-x-4">
         {!isRecording && !audioBlob && (
           <button
-            onClick={startRecording}
+            onClick={handleStartRecording}
             disabled={isUploading}
             className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-red-300"
           >
@@ -165,14 +271,14 @@ const ConversationRecorder: React.FC<ConversationRecorderProps> = ({
         {isRecording && !isPaused && (
           <>
             <button
-              onClick={pauseRecording}
+              onClick={handlePauseRecording}
               className="flex items-center gap-2 px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600"
             >
               <HiPause className="w-5 h-5" />
               Pause
             </button>
             <button
-              onClick={stopRecording}
+              onClick={handleStopRecording}
               className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
             >
               <HiStop className="w-5 h-5" />
@@ -184,14 +290,14 @@ const ConversationRecorder: React.FC<ConversationRecorderProps> = ({
         {isRecording && isPaused && (
           <>
             <button
-              onClick={resumeRecording}
+              onClick={handleResumeRecording}
               className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
             >
               <HiPlay className="w-5 h-5" />
               Resume
             </button>
             <button
-              onClick={stopRecording}
+              onClick={handleStopRecording}
               className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
             >
               <HiStop className="w-5 h-5" />
@@ -211,7 +317,7 @@ const ConversationRecorder: React.FC<ConversationRecorderProps> = ({
               {isUploading ? `Uploading ${uploadProgress}%` : 'Upload Recording'}
             </button>
             <button
-              onClick={resetRecording}
+              onClick={handleResetRecording}
               disabled={isUploading}
               className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:bg-gray-300"
             >

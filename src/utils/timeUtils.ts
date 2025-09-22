@@ -4,21 +4,27 @@
 
 /**
  * Combines a date string (YYYY-MM-DD) and time string (HH:MM) into an ISO 8601 string
+ * Preserves local timezone to avoid date/time shifting
  */
 export function combineDateAndTime(dateString: string, timeString: string): string {
   if (!dateString || !timeString) {
     return '';
   }
   
-  // Create a new Date object from the date string and time string
-  const combinedDateTime = new Date(`${dateString}T${timeString}:00`);
+  // Parse date and time components
+  const [year, month, day] = dateString.split('-').map(Number);
+  const [hours, minutes] = timeString.split(':').map(Number);
+  
+  // Create Date object in local timezone
+  const combinedDateTime = new Date(year, month - 1, day, hours, minutes, 0, 0);
   
   // Return as ISO string
   return combinedDateTime.toISOString();
 }
 
 /**
- * Extracts the date portion (YYYY-MM-DD) from an ISO 8601 string
+ * Extracts the date portion (YYYY-MM-DD) from an ISO 8601 string or Date object
+ * Returns date in local timezone
  */
 export function extractDateFromISOString(isoString: string): string {
   if (!isoString) {
@@ -27,7 +33,11 @@ export function extractDateFromISOString(isoString: string): string {
   
   try {
     const date = new Date(isoString);
-    return date.toISOString().split('T')[0];
+    // Use local date components to avoid timezone shifts
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    return `${year}-${month}-${day}`;
   } catch (error) {
     console.error('Error extracting date from ISO string:', error);
     return '';
@@ -35,7 +45,8 @@ export function extractDateFromISOString(isoString: string): string {
 }
 
 /**
- * Extracts the time portion (HH:MM) from an ISO 8601 string
+ * Extracts the time portion (HH:MM) from an ISO 8601 string or Date object
+ * Returns time in local timezone
  */
 export function extractTimeFromISOString(isoString: string): string {
   if (!isoString) {
@@ -44,6 +55,7 @@ export function extractTimeFromISOString(isoString: string): string {
   
   try {
     const date = new Date(isoString);
+    // Use local time components to avoid timezone shifts
     const hours = date.getHours().toString().padStart(2, '0');
     const minutes = date.getMinutes().toString().padStart(2, '0');
     return `${hours}:${minutes}`;

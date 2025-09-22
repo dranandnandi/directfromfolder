@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { HiUser, HiOfficeBuilding, HiBell } from 'react-icons/hi';
+import { HiUser, HiOfficeBuilding, HiBell/*, HiChat*/ } from 'react-icons/hi';
 import OrganizationSettingsForm from './OrganizationSettingsForm';
 import NotificationSettings from './NotificationSettings';
+// import WhatsAppSettingsForm from './WhatsAppSettingsForm'; // Temporarily hidden
 import { OrganizationSettings } from '../models/task';
 import { supabase } from '../utils/supabaseClient';
 
@@ -12,7 +13,7 @@ const isValidUUID = (uuid: string): boolean => {
 };
 
 const Settings = () => {
-  const [activeTab, setActiveTab] = useState<'organization' | 'profile' | 'notifications'>('organization');
+  const [activeTab, setActiveTab] = useState<'organization' | 'profile' | 'notifications'/* | 'whatsapp'*/>('organization');
   const [organizationSettings, setOrganizationSettings] = useState<OrganizationSettings>({
     id: '', // Will be updated with the actual organization ID
     organizationId: '', // Will be updated with the actual organization ID
@@ -167,6 +168,18 @@ const Settings = () => {
             <HiBell className="w-5 h-5 inline mr-2" />
             Notifications
           </button>
+          {/* WhatsApp tab temporarily hidden */}
+          {/* <button
+            onClick={() => setActiveTab('whatsapp')}
+            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'whatsapp'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            <HiChat className="w-5 h-5 inline mr-2" />
+            WhatsApp
+          </button> */}
           <button
             onClick={() => setActiveTab('profile')}
             className={`py-2 px-1 border-b-2 font-medium text-sm ${
@@ -206,6 +219,17 @@ const Settings = () => {
             <NotificationSettings />
           </div>
         )}
+
+        {/* WhatsApp Settings - temporarily hidden */}
+        {/* {activeTab === 'whatsapp' && (
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            <h3 className="text-lg font-medium mb-4 flex items-center gap-2">
+              <HiChat className="w-5 h-5 text-green-500" />
+              WhatsApp Integration
+            </h3>
+            <WhatsAppSettingsForm />
+          </div>
+        )} */}
 
         {/* Profile Settings */}
         {activeTab === 'profile' && (

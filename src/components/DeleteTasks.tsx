@@ -483,9 +483,9 @@ const DeleteTasks: React.FC<DeleteTasksProps> = ({ teamMembers, onTasksRefreshed
 
   const getTaskTypeLabel = (type: string) => {
     switch (type) {
-      case TaskType.QuickAdvisory: return 'Regular Tasks';
-      case TaskType.ClinicalRound: return 'Patient Tracking';
-      case TaskType.FollowUp: return 'Audit Tasks';
+      case TaskType.RegularTask: return 'Regular Tasks';
+      case TaskType.PatientTracking: return 'Patient Tracking';
+      case TaskType.AuditTask: return 'Audit Tasks';
       case TaskType.PersonalTask: return 'Personal Task';
       default: return type;
     }
@@ -610,9 +610,9 @@ const DeleteTasks: React.FC<DeleteTasksProps> = ({ teamMembers, onTasksRefreshed
               className="w-full text-sm rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
             >
               <option value="">All Types</option>
-              <option value={TaskType.QuickAdvisory}>Regular Tasks</option>
-              <option value={TaskType.ClinicalRound}>Patient Tracking</option>
-              <option value={TaskType.FollowUp}>Audit Task</option>
+              <option value={TaskType.RegularTask}>Regular Tasks</option>
+              <option value={TaskType.PatientTracking}>Patient Tracking</option>
+              <option value={TaskType.AuditTask}>Audit Task</option>
               <option value={TaskType.PersonalTask}>Personal Task</option>
             </select>
           </div>

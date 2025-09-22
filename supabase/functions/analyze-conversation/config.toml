@@ -1,0 +1,2 @@
+[build]
+command = "deno run --allow-env --allow-net index.ts"

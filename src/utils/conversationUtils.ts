@@ -28,8 +28,7 @@ export interface EnhancedConversationAnalysis {
 export const uploadConversationRecording = async (
   audioBlob: Blob,
   employeeId: string,
-  customerIdentifier?: string,
-  taskId?: string
+  customerIdentifier?: string
 ): Promise<{ data: any; error: any }> => {
   try {
     // Generate a unique filename
@@ -66,8 +65,7 @@ export const uploadConversationRecording = async (
           customer_identifier: customerIdentifier || null,
           audio_file_url: urlData.publicUrl,
           duration: estimatedDuration,
-          status: 'pending',
-          task_id: taskId || null
+          status: 'pending'
         }
       ])
       .select()
