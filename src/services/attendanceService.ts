@@ -190,7 +190,7 @@ export class AttendanceService {
     const currentShift = await this.getEmployeeCurrentShift(userId);
     
     // Upload selfie
-    const selfieUrl = await this.uploadSelfie(punchData.selfie_file, userId, 'punch_in');
+    const selfieUrl = await this.uploadSelfie(punchData.selfie_file, userId, 'punch_in', userData.organization_id);
     
     // Create or update attendance record
     const attendanceData = {
@@ -220,8 +220,17 @@ export class AttendanceService {
     const today = new Date().toISOString().split('T')[0];
     const currentTime = new Date().toISOString();
     
+    // Get user's organization
+    const { data: userData } = await supabase
+      .from('users')
+      .select('organization_id')
+      .eq('id', userId)
+      .single();
+    
+    if (!userData) throw new Error('User not found');
+    
     // Upload selfie
-    const selfieUrl = await this.uploadSelfie(punchData.selfie_file, userId, 'punch_out');
+    const selfieUrl = await this.uploadSelfie(punchData.selfie_file, userId, 'punch_out', userData.organization_id);
     
     const { data, error } = await supabase
       .from('attendance')
@@ -369,24 +378,15 @@ export class AttendanceService {
   
   // ========== UTILITY FUNCTIONS ==========
   
-  static async uploadSelfie(file: File, userId: string, type: 'punch_in' | 'punch_out'): Promise<string> {
+  static async uploadSelfie(file: File, userId: string, type: 'punch_in' | 'punch_out', organizationId: string): Promise<string> {
     try {
-      // First check if the bucket exists
-      const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
-      
-      if (bucketError) {
-        console.warn('Cannot access storage buckets:', bucketError);
-        return `placeholder-${type}-${Date.now()}`;
-      }
-
-      const attendanceBucket = buckets?.find(bucket => bucket.id === 'attendance-selfies');
-      if (!attendanceBucket) {
-        console.warn('Attendance selfies bucket not found. Creating placeholder URL.');
-        return `placeholder-${type}-${Date.now()}`;
-      }
-
-      const timestamp = new Date().getTime();
-      const fileName = `attendance/${userId}/${type}_${timestamp}.jpg`;
+      // Create organized folder structure: attendance/orgId/year/month/day/userId/type_timestamp.jpg
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0'); // 01-12
+      const day = String(now.getDate()).padStart(2, '0'); // 01-31
+      const timestamp = now.getTime();
+      const fileName = `attendance/${organizationId}/${year}/${month}/${day}/${userId}/${type}_${timestamp}.jpg`;
       
       const { error } = await supabase.storage
         .from('attendance-selfies')

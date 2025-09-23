@@ -131,15 +131,34 @@ const AttendanceDetailModal: React.FC<AttendanceDetailModalProps> = ({
                     <div className="text-sm">{attendance.punch_in_address}</div>
                   </div>
                 )}
-                {attendance.punch_in_selfie_url && (
+                {attendance.punch_in_selfie_url && !attendance.punch_in_selfie_url.startsWith('placeholder-') && (
                   <div>
                     <span className="text-sm text-gray-600">Photo:</span>
                     <div className="mt-1">
-                      <img 
-                        src={attendance.punch_in_selfie_url} 
-                        alt="Punch In Photo" 
-                        className="w-24 h-24 object-cover rounded-lg"
+                      <img
+                        src={attendance.punch_in_selfie_url}
+                        alt="Punch In Photo"
+                        className="w-24 h-24 object-cover rounded-lg border"
+                        onError={(e) => {
+                          const img = e.currentTarget as HTMLImageElement;
+                          const fallback = img.nextElementSibling as HTMLElement;
+                          if (img && fallback) {
+                            img.style.display = 'none';
+                            fallback.style.display = 'block';
+                          }
+                        }}
                       />
+                      <div className="hidden text-xs text-gray-500 mt-1">
+                        Image not available
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {attendance.punch_in_selfie_url && attendance.punch_in_selfie_url.startsWith('placeholder-') && (
+                  <div>
+                    <span className="text-sm text-gray-600">Photo:</span>
+                    <div className="mt-1 text-xs text-gray-500">
+                      Photo not captured
                     </div>
                   </div>
                 )}
@@ -168,15 +187,34 @@ const AttendanceDetailModal: React.FC<AttendanceDetailModalProps> = ({
                     <div className="text-sm">{attendance.punch_out_address}</div>
                   </div>
                 )}
-                {attendance.punch_out_selfie_url && (
+                {attendance.punch_out_selfie_url && !attendance.punch_out_selfie_url.startsWith('placeholder-') && (
                   <div>
                     <span className="text-sm text-gray-600">Photo:</span>
                     <div className="mt-1">
-                      <img 
-                        src={attendance.punch_out_selfie_url} 
-                        alt="Punch Out Photo" 
-                        className="w-24 h-24 object-cover rounded-lg"
+                      <img
+                        src={attendance.punch_out_selfie_url}
+                        alt="Punch Out Photo"
+                        className="w-24 h-24 object-cover rounded-lg border"
+                        onError={(e) => {
+                          const img = e.currentTarget as HTMLImageElement;
+                          const fallback = img.nextElementSibling as HTMLElement;
+                          if (img && fallback) {
+                            img.style.display = 'none';
+                            fallback.style.display = 'block';
+                          }
+                        }}
                       />
+                      <div className="hidden text-xs text-gray-500 mt-1">
+                        Image not available
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {attendance.punch_out_selfie_url && attendance.punch_out_selfie_url.startsWith('placeholder-') && (
+                  <div>
+                    <span className="text-sm text-gray-600">Photo:</span>
+                    <div className="mt-1 text-xs text-gray-500">
+                      Photo not captured
                     </div>
                   </div>
                 )}
