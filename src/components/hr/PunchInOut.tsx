@@ -141,16 +141,53 @@ const PunchInOut: React.FC = () => {
 
       const { data: userData } = await supabase
         .from('users')
-        .select('id')
+        .select('id, organization_id')
         .eq('auth_id', currentUser.user.id)
         .single();
 
       if (!userData) return;
       setUserId(userData.id);
 
-      // Get today's attendance
-      const attendance = await AttendanceService.getTodayAttendance(userData.id);
-      setTodayAttendance(attendance);
+      // Use the enhanced function to get attendance with shift details
+      const { data: attendanceData } = await supabase
+        .rpc('get_attendance_with_details', {
+          p_organization_id: userData.organization_id,
+          p_date: new Date().toISOString().split('T')[0],
+          p_user_id: userData.id
+        });
+
+      if (attendanceData && attendanceData.length > 0) {
+        const todayRecord = attendanceData[0];
+        // Transform to match Attendance model
+        const attendance: any = {
+          id: todayRecord.id,
+          user_id: todayRecord.user_id,
+          date: todayRecord.date,
+          punch_in_time: todayRecord.punch_in_time,
+          punch_out_time: todayRecord.punch_out_time,
+          total_hours: todayRecord.total_hours,
+          is_late: todayRecord.is_late,
+          is_early_out: todayRecord.is_early_out,
+          shift: todayRecord.shift_name ? {
+            id: '',
+            name: todayRecord.shift_name,
+            start_time: todayRecord.shift_start_time,
+            end_time: todayRecord.shift_end_time,
+            duration_hours: 8,
+            organization_id: userData.organization_id,
+            break_duration_minutes: 60,
+            late_threshold_minutes: 15,
+            early_out_threshold_minutes: 15,
+            is_active: true,
+            created_at: '',
+            updated_at: ''
+          } : undefined
+        };
+        setTodayAttendance(attendance);
+      } else {
+        // No attendance record found for today
+        setTodayAttendance(null);
+      }
 
       // Get current location
       await getCurrentLocation();
@@ -380,19 +417,66 @@ const PunchInOut: React.FC = () => {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-gray-600">Total Hours:</span>
-              <span className="font-medium">{status.total_hours?.toFixed(2)}h</span>
+              <span className="font-medium">
+                {(() => {
+                  if (status.punch_in_time && status.punch_out_time) {
+                    const punchIn = new Date(status.punch_in_time);
+                    const punchOut = new Date(status.punch_out_time);
+                    const diffMs = punchOut.getTime() - punchIn.getTime();
+                    const hours = diffMs / (1000 * 60 * 60);
+                    return `${hours.toFixed(2)}h`;
+                  }
+                  return '0.00h';
+                })()}
+              </span>
             </div>
             <div className="pt-2 border-t">
               <div className="flex items-center justify-center gap-4">
-                {status.is_late && (
-                  <span className="text-red-600 text-sm">⚠️ Late</span>
-                )}
-                {status.is_early_out && (
-                  <span className="text-yellow-600 text-sm">⚠️ Early Out</span>
-                )}
-                {!status.is_late && !status.is_early_out && (
-                  <span className="text-green-600 text-sm">✓ On Time</span>
-                )}
+                {(() => {
+                  // Calculate actual late/early status based on shift times
+                  if (!status.shift || !status.punch_in_time) {
+                    return <span className="text-green-600 text-sm">✓ Present</span>;
+                  }
+
+                  const punchInTime = new Date(status.punch_in_time);
+                  const punchInHour = punchInTime.getHours();
+                  const punchInMinute = punchInTime.getMinutes();
+                  
+                  // Parse shift start time (format: "HH:MM:SS")
+                  const [shiftStartHour, shiftStartMinute] = status.shift.start_time.split(':').map(Number);
+                  const [shiftEndHour, shiftEndMinute] = status.shift.end_time.split(':').map(Number);
+                  
+                  // Convert to minutes for comparison
+                  const punchInMinutes = punchInHour * 60 + punchInMinute;
+                  const shiftStartMinutes = shiftStartHour * 60 + shiftStartMinute;
+                  const shiftEndMinutes = shiftEndHour * 60 + shiftEndMinute;
+                  
+                  // Check if late (more than 15 minutes after shift start)
+                  const isActuallyLate = punchInMinutes > (shiftStartMinutes + 15);
+                  
+                  // Check if early out (more than 15 minutes before shift end)
+                  let isActuallyEarlyOut = false;
+                  if (status.punch_out_time) {
+                    const punchOutTime = new Date(status.punch_out_time);
+                    const punchOutMinutes = punchOutTime.getHours() * 60 + punchOutTime.getMinutes();
+                    isActuallyEarlyOut = punchOutMinutes < (shiftEndMinutes - 15);
+                  }
+
+                  // Display status based on calculations
+                  const statuses = [];
+                  
+                  // Always show Present first if punched in
+                  statuses.push(<span key="present" className="text-green-600 text-sm">✓ Present</span>);
+                  
+                  if (isActuallyLate) {
+                    statuses.push(<span key="late" className="text-red-600 text-sm">⚠️ Late</span>);
+                  }
+                  if (isActuallyEarlyOut) {
+                    statuses.push(<span key="early" className="text-yellow-600 text-sm">⚠️ Early Out</span>);
+                  }
+                  
+                  return statuses;
+                })()}
               </div>
             </div>
           </div>

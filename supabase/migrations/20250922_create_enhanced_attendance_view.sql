@@ -120,7 +120,7 @@ LEFT JOIN employee_shifts es ON (
 )
 LEFT JOIN shifts s ON es.shift_id = s.id;
 
--- Create function to get attendance with all details
+-- Create function to get attendance with all details including employees without attendance
 CREATE OR REPLACE FUNCTION get_attendance_with_details(
   p_organization_id uuid,
   p_date date DEFAULT CURRENT_DATE,
@@ -129,22 +129,22 @@ CREATE OR REPLACE FUNCTION get_attendance_with_details(
 RETURNS TABLE (
   id uuid,
   user_id uuid,
-  user_name text,
-  user_department text,
-  user_role text,
+  user_name character varying(100),
+  user_department character varying(50),
+  user_role character varying(20),
   date date,
   punch_in_time timestamptz,
   punch_out_time timestamptz,
-  punch_in_address text,
-  punch_out_address text,
-  punch_in_selfie_url text,
-  punch_out_selfie_url text,
+  punch_in_address character varying(500),
+  punch_out_address character varying(500),
+  punch_in_selfie_url character varying(500),
+  punch_out_selfie_url character varying(500),
   total_hours numeric,
   effective_hours numeric,
-  shift_name text,
+  shift_name character varying(100),
   shift_start_time time,
   shift_end_time time,
-  attendance_status text,
+  attendance_status character varying(20),
   is_late boolean,
   is_early_out boolean,
   is_regularized boolean,
@@ -154,12 +154,12 @@ RETURNS TABLE (
 BEGIN
   RETURN QUERY
   SELECT 
-    adv.id,
-    adv.user_id,
-    adv.user_name,
-    adv.user_department,
-    adv.user_role,
-    adv.date,
+    COALESCE(adv.id, gen_random_uuid()) as id,
+    u.id as user_id,
+    u.name as user_name,
+    u.department as user_department,
+    u.role as user_role,
+    p_date as date,
     adv.punch_in_time,
     adv.punch_out_time,
     adv.punch_in_address,
@@ -171,17 +171,22 @@ BEGIN
     adv.shift_name,
     adv.shift_start_time,
     adv.shift_end_time,
-    adv.attendance_status,
-    adv.calculated_is_late,
-    adv.calculated_is_early_out,
-    adv.is_regularized,
+    COALESCE(adv.attendance_status, 'absent') as attendance_status,
+    COALESCE(adv.calculated_is_late, false) as is_late,
+    COALESCE(adv.calculated_is_early_out, false) as is_early_out,
+    COALESCE(adv.is_regularized, false) as is_regularized,
     adv.minutes_late_or_early,
     adv.minutes_early_out
-  FROM attendance_dashboard_view adv
-  WHERE adv.organization_id = p_organization_id
+  FROM users u
+  LEFT JOIN attendance_dashboard_view adv ON (
+    u.id = adv.user_id 
     AND adv.date = p_date
-    AND (p_user_id IS NULL OR adv.user_id = p_user_id)
-  ORDER BY adv.user_name;
+    AND adv.organization_id = p_organization_id
+  )
+  WHERE u.organization_id = p_organization_id
+    AND u.role IN ('admin', 'user', 'superadmin')
+    AND (p_user_id IS NULL OR u.id = p_user_id)
+  ORDER BY u.name;
 END;
 $$ LANGUAGE plpgsql;
 

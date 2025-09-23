@@ -77,11 +77,32 @@ const AttendanceDetailModal: React.FC<AttendanceDetailModalProps> = ({
                     {attendance.shift_start_time} - {attendance.shift_end_time}
                   </span>
                 </div>
-                {attendance.minutes_late_or_early && (
+                {/* Fix late/early calculation display */}
+                {attendance.punch_in_time && attendance.shift_start_time && (
                   <div className="flex justify-between">
                     <span className="text-sm text-gray-600">Late/Early:</span>
-                    <span className={`text-sm font-medium ${attendance.minutes_late_or_early > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                      {Math.abs(attendance.minutes_late_or_early)} minutes {attendance.minutes_late_or_early > 0 ? 'late' : 'early'}
+                    <span className={`text-sm font-medium`}>
+                      {(() => {
+                        const punchInTime = new Date(attendance.punch_in_time);
+                        const punchInHour = punchInTime.getHours();
+                        const punchInMinute = punchInTime.getMinutes();
+                        
+                        // Parse shift start time (format: "HH:MM:SS")
+                        const [shiftStartHour, shiftStartMinute] = attendance.shift_start_time.split(':').map(Number);
+                        
+                        // Convert to minutes for comparison
+                        const punchInMinutes = punchInHour * 60 + punchInMinute;
+                        const shiftStartMinutes = shiftStartHour * 60 + shiftStartMinute;
+                        const diffMinutes = punchInMinutes - shiftStartMinutes;
+                        
+                        if (diffMinutes > 15) {
+                          return <span className="text-red-600">{Math.round(diffMinutes)} minutes late</span>;
+                        } else if (diffMinutes < -15) {
+                          return <span className="text-green-600">{Math.round(Math.abs(diffMinutes))} minutes early</span>;
+                        } else {
+                          return <span className="text-green-600">On time</span>;
+                        }
+                      })()}
                     </span>
                   </div>
                 )}
@@ -270,6 +291,7 @@ const AttendanceDashboard: React.FC = () => {
   const [showAttendanceDetail, setShowAttendanceDetail] = useState(false);
   const [selectedAttendance, setSelectedAttendance] = useState<any>(null);
   const [organizationId, setOrganizationId] = useState<string>('');
+  const [currentUserRole, setCurrentUserRole] = useState<string>('');
 
   useEffect(() => {
     initializeData();
@@ -283,26 +305,40 @@ const AttendanceDashboard: React.FC = () => {
 
   const initializeData = async () => {
     try {
-      // Get current user's organization
+      // Get current user's organization and role
       const { data: currentUser } = await supabase.auth.getUser();
+      console.log('Current user:', currentUser.user?.id);
       if (!currentUser.user?.id) return;
 
       const { data: userData } = await supabase
         .from('users')
-        .select('organization_id')
+        .select('organization_id, role, id')
         .eq('auth_id', currentUser.user.id)
         .single();
 
-      if (!userData?.organization_id) return;
+      console.log('User data:', userData);
+      
+      if (!userData?.organization_id) {
+        console.log('No organization ID found for user');
+        return;
+      }
 
+      console.log('Setting organization ID:', userData.organization_id);
+      console.log('User role:', userData.role);
       setOrganizationId(userData.organization_id);
+      setCurrentUserRole(userData.role);
     } catch (error) {
       console.error('Error initializing:', error);
     }
   };
 
   const fetchAttendanceData = async () => {
-    if (!organizationId) return;
+    if (!organizationId) {
+      console.log('No organization ID available');
+      return;
+    }
+    
+    console.log('Fetching attendance with:', { organizationId, selectedDate });
     
     try {
       setLoading(true);
@@ -316,127 +352,27 @@ const AttendanceDashboard: React.FC = () => {
 
       if (attendanceError) {
         console.error('Error fetching attendance data:', attendanceError);
-        // Fallback to original query if the new function fails
-        const { data: employees } = await supabase
-          .from('users')
-          .select('id, name, department, role')
-          .eq('organization_id', organizationId)
-          .in('role', ['admin', 'user'])
-          .order('name');
-
-        if (!employees) {
-          setAttendance([]);
-          setRegularizations([]);
-          setLoading(false);
-          return;
-        }
-
-        const { data: fallbackData } = await supabase
-          .from('attendance_dashboard_view')
-          .select('*')
-          .eq('organization_id', organizationId)
-          .eq('date', selectedDate);
-
-        const attendanceMap = new Map();
-        if (fallbackData) {
-          fallbackData.forEach(record => {
-            attendanceMap.set(record.user_id, {
-              ...record,
-              user: {
-                id: record.user_id,
-                name: record.user_name,
-                department: record.user_department,
-                role: record.user_role
-              }
-            });
-          });
-        }
-
-        const allAttendanceRecords = employees.map(employee => {
-          const existingRecord = attendanceMap.get(employee.id);
-          
-          if (existingRecord) {
-            return existingRecord;
-          } else {
-            return {
-              id: `placeholder-${employee.id}`,
-              user_id: employee.id,
-              organization_id: organizationId,
-              date: selectedDate,
-              punch_in_time: null,
-              punch_out_time: null,
-              total_hours: null,
-              is_late: false,
-              is_early_out: false,
-              is_absent: true,
-              is_regularized: false,
-              attendance_status: 'absent',
-              user: employee
-            };
-          }
-        });
-
-        setAttendance(allAttendanceRecords);
-      } else {
-        // Transform the function result to match our component expectations
-        const transformedData = attendanceData.map((record: any) => ({
-          ...record,
-          user: {
-            id: record.user_id,
-            name: record.user_name,
-            department: record.user_department,
-            role: record.user_role
-          }
-        }));
-
-        // Get all employees to ensure we show everyone
-        const { data: allEmployees } = await supabase
-          .from('users')
-          .select('id, name, department, role')
-          .eq('organization_id', organizationId)
-          .in('role', ['admin', 'user'])
-          .order('name');
-
-        if (allEmployees) {
-          const attendanceMap = new Map();
-          transformedData.forEach((record: any) => {
-            attendanceMap.set(record.user_id, record);
-          });
-
-          const completeAttendanceRecords = allEmployees.map(employee => {
-            const existingRecord = attendanceMap.get(employee.id);
-            
-            if (existingRecord) {
-              return existingRecord;
-            } else {
-              return {
-                id: `placeholder-${employee.id}`,
-                user_id: employee.id,
-                organization_id: organizationId,
-                date: selectedDate,
-                punch_in_time: null,
-                punch_out_time: null,
-                total_hours: null,
-                is_late: false,
-                is_early_out: false,
-                is_absent: true,
-                is_regularized: false,
-                attendance_status: 'absent',
-                user: employee
-              };
-            }
-          });
-
-          setAttendance(completeAttendanceRecords);
-        } else {
-          setAttendance(transformedData);
-        }
+        setAttendance([]);
+        setRegularizations([]);
+        setLoading(false);
+        return;
       }
 
-      const [regularizationData] = await Promise.all([
-        AttendanceService.getPendingRegularizations(organizationId)
-      ]);
+      // Transform the function result to match our component expectations
+      const transformedData = (attendanceData || []).map((record: any) => ({
+        ...record,
+        user: {
+          id: record.user_id,
+          name: record.user_name,
+          department: record.user_department,
+          role: record.user_role
+        }
+      }));
 
+      setAttendance(transformedData);
+
+      // Get regularizations
+      const regularizationData = await AttendanceService.getPendingRegularizations(organizationId);
       setRegularizations(regularizationData);
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -545,7 +481,19 @@ const AttendanceDashboard: React.FC = () => {
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-semibold">Attendance Dashboard</h2>
-          <p className="text-gray-600">Monitor daily attendance and manage regularizations</p>
+          <p className="text-gray-600">
+            Monitor daily attendance and manage regularizations
+            {currentUserRole && currentUserRole !== 'admin' && currentUserRole !== 'superadmin' && (
+              <span className="ml-2 px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
+                Personal View
+              </span>
+            )}
+            {(currentUserRole === 'admin' || currentUserRole === 'superadmin') && (
+              <span className="ml-2 px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
+                Organization View
+              </span>
+            )}
+          </p>
         </div>
         <div className="flex items-center gap-4">
           <input
@@ -721,15 +669,34 @@ const AttendanceDashboard: React.FC = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">
-                      {record.total_hours !== null && record.total_hours !== undefined ? (
+                      {record.punch_in_time && record.punch_out_time ? (
                         <div>
-                          <div className="font-medium">{record.total_hours}h</div>
-                          {(record as any).effective_hours && (
-                            <div className="text-xs text-gray-500">
-                              Effective: {(record as any).effective_hours}h
-                            </div>
-                          )}
+                          <div className="font-medium">
+                            {/* Always calculate hours from punch times for accuracy */}
+                            {(() => {
+                              const punchIn = new Date(record.punch_in_time);
+                              const punchOut = new Date(record.punch_out_time);
+                              const diffMs = punchOut.getTime() - punchIn.getTime();
+                              const hours = diffMs / (1000 * 60 * 60);
+                              return `${hours.toFixed(2)}h`;
+                            })()}
+                          </div>
+                          {/* Show effective hours if available */}
+                          {(() => {
+                            const punchIn = new Date(record.punch_in_time);
+                            const punchOut = new Date(record.punch_out_time);
+                            const diffMs = punchOut.getTime() - punchIn.getTime();
+                            const totalHours = diffMs / (1000 * 60 * 60);
+                            const effectiveHours = totalHours - 1.0; // Subtract 1 hour break
+                            return effectiveHours > 0 ? (
+                              <div className="text-xs text-gray-500">
+                                Effective: {effectiveHours.toFixed(2)}h
+                              </div>
+                            ) : null;
+                          })()}
                         </div>
+                      ) : record.punch_in_time ? (
+                        <span className="text-blue-600">Still checked in</span>
                       ) : (
                         '-'
                       )}
@@ -737,31 +704,107 @@ const AttendanceDashboard: React.FC = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex flex-col gap-1">
-                      {(record.is_absent || !record.punch_in_time) && (
-                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
-                          Absent
-                        </span>
-                      )}
-                      {record.is_late && !record.is_regularized && (
-                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
-                          Late
-                        </span>
-                      )}
-                      {record.is_early_out && !record.is_regularized && (
-                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
-                          Early Out
-                        </span>
-                      )}
-                      {record.is_regularized && (
-                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                          Regularized
-                        </span>
-                      )}
-                      {record.punch_in_time && !record.is_late && !record.is_early_out && !record.is_absent && (
-                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                          {(record as any).attendance_status === 'checked_in' ? 'Checked In' : 'On Time'}
-                        </span>
-                      )}
+                      {/* Fix status logic */}
+                      {(() => {
+                        // If no punch in, user is absent
+                        if (!record.punch_in_time) {
+                          return (
+                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                              Absent
+                            </span>
+                          );
+                        }
+
+                        // If regularized, show that first
+                        if (record.is_regularized) {
+                          return (
+                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                              Regularized
+                            </span>
+                          );
+                        }
+
+                        // Check if user has a shift to calculate late/early
+                        const hasShift = (record as any).shift_start_time && (record as any).shift_end_time;
+                        
+                        if (hasShift) {
+                          // Parse times properly - shift times are in local time
+                          const punchInTime = new Date(record.punch_in_time);
+                          const punchInHour = punchInTime.getHours();
+                          const punchInMinute = punchInTime.getMinutes();
+                          
+                          // Parse shift start time (format: "HH:MM:SS")
+                          const [shiftStartHour, shiftStartMinute] = (record as any).shift_start_time.split(':').map(Number);
+                          const [shiftEndHour, shiftEndMinute] = (record as any).shift_end_time.split(':').map(Number);
+                          
+                          // Convert to minutes for easier comparison
+                          const punchInMinutes = punchInHour * 60 + punchInMinute;
+                          const shiftStartMinutes = shiftStartHour * 60 + shiftStartMinute;
+                          const shiftEndMinutes = shiftEndHour * 60 + shiftEndMinute;
+                          
+                          // Check if late (more than 15 minutes after shift start)
+                          const isActuallyLate = punchInMinutes > (shiftStartMinutes + 15);
+                          
+                          // Check if early out (more than 15 minutes before shift end)
+                          let isActuallyEarlyOut = false;
+                          if (record.punch_out_time) {
+                            const punchOutTime = new Date(record.punch_out_time);
+                            const punchOutMinutes = punchOutTime.getHours() * 60 + punchOutTime.getMinutes();
+                            isActuallyEarlyOut = punchOutMinutes < (shiftEndMinutes - 15);
+                          }
+
+                          if (isActuallyLate && isActuallyEarlyOut) {
+                            return (
+                              <>
+                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                  Present
+                                </span>
+                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                                  Late
+                                </span>
+                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
+                                  Early Out
+                                </span>
+                              </>
+                            );
+                          } else if (isActuallyLate) {
+                            return (
+                              <>
+                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                  Present
+                                </span>
+                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                                  Late
+                                </span>
+                              </>
+                            );
+                          } else if (isActuallyEarlyOut) {
+                            return (
+                              <>
+                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                  Present
+                                </span>
+                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
+                                  Early Out
+                                </span>
+                              </>
+                            );
+                          } else {
+                            return (
+                              <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                Present
+                              </span>
+                            );
+                          }
+                        } else {
+                          // No shift assigned, just show present
+                          return (
+                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                              Present (No Shift)
+                            </span>
+                          );
+                        }
+                      })()}
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
