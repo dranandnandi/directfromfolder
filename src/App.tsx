@@ -19,7 +19,13 @@ const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
 const LeaveManagement = lazy(() => import('./components/LeaveManagement'));
 const PunchInOut = lazy(() => import('./components/hr/PunchInOut'));
 const AttendanceDashboard = lazy(() => import('./components/hr/AttendanceDashboard'));
+
+// Payroll system lazy imports
+const PayrollShell = lazy(() => import('./payroll/PayrollShell'));
+const MyPayslip = lazy(() => import('./me/MyPayslip'));
+
 import { Task, TaskType, User, OrganizationSettings, TaskStatus, TaskPriority } from './models/task';
+import { OrganizationProvider } from './contexts/OrganizationContext';
 
 // Define interfaces for raw Supabase response data
 interface RawSupabaseUser {
@@ -85,6 +91,21 @@ function App() {
   const [profileError, setProfileError] = useState<string | null>(null);
   const [hasInitialDataLoaded, setHasInitialDataLoaded] = useState(false);
   const isFetchingRef = useRef(false);
+
+  // Role-based access control component
+  const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles: string[] }> = ({ children, allowedRoles }) => {
+    if (!userRole || !allowedRoles.includes(userRole)) {
+      return (
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">Access Denied</h2>
+            <p className="text-gray-600">You don't have permission to access this section.</p>
+          </div>
+        </div>
+      );
+    }
+    return <>{children}</>;
+  };
 
   // Add organization settings state with setter
   const [organizationSettings, setOrganizationSettings] = useState<OrganizationSettings>({
@@ -1023,6 +1044,27 @@ function App() {
               <Suspense fallback={<div className="p-4">Loading punch in/out...</div>}>
                 <PunchInOut />
               </Suspense>
+            } />
+            {/* Payroll System Routes */}
+            <Route path="/payroll/*" element={
+              <ProtectedRoute allowedRoles={['admin', 'payroll_admin']}>
+                <Suspense fallback={<div className="p-4">Loading payroll...</div>}>
+                  {userOrganizationId ? (
+                    <OrganizationProvider organizationId={userOrganizationId}>
+                      <PayrollShell />
+                    </OrganizationProvider>
+                  ) : (
+                    <div className="p-4">Loading organization...</div>
+                  )}
+                </Suspense>
+              </ProtectedRoute>
+            } />
+            <Route path="/my-payslip" element={
+              <ProtectedRoute allowedRoles={['admin', 'payroll_admin', 'user']}>
+                <Suspense fallback={<div className="p-4">Loading payslip...</div>}>
+                  <MyPayslip />
+                </Suspense>
+              </ProtectedRoute>
             } />
             {/* Catch-all route - redirect to dashboard */}
             <Route path="*" element={

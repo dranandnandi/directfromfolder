@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { HiX, HiOfficeBuilding, HiChartBar, HiCog, HiQuestionMarkCircle, HiUserGroup, HiTrash, HiRefresh, HiUsers, HiCalendar, HiClock } from 'react-icons/hi';
+import { HiX, HiOfficeBuilding, HiChartBar, HiCog, HiQuestionMarkCircle, HiUserGroup, HiTrash, HiRefresh, HiUsers, HiCalendar, HiClock, HiCurrencyDollar, HiDocument } from 'react-icons/hi';
 import { supabase } from '../utils/supabaseClient';
 import { OrganizationSettings } from '../models/task';
 import dcpLogo from '/notification-icon.svg';
@@ -166,6 +166,24 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
             >
               Leave Management
             </MenuItem>
+            {(userRole === 'admin' || userRole === 'superadmin') && (
+              <MenuItem 
+                icon={HiCurrencyDollar}
+                to="/payroll"
+                active={activeView === 'payroll'}
+              >
+                Payroll
+              </MenuItem>
+            )}
+            {(userRole !== 'admin' && userRole !== 'superadmin') && (
+              <MenuItem 
+                icon={HiDocument}
+                to="/my-payslip"
+                active={activeView === 'my-payslip'}
+              >
+                My Payslip
+              </MenuItem>
+            )}
           </nav>
 
           {/* Settings Section */}

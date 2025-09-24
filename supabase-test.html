@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Supabase Query Test</title>
+</head>
+<body>
+    <h1>Supabase Query Test</h1>
+    <button onclick="testQuery()">Test payroll_periods Query</button>
+    <div id="results"></div>
+
+    <script type="module">
+        import { createClient } from 'https://cdn.skypack.dev/@supabase/supabase-js';
+
+        // Replace with your actual Supabase URL and anon key
+        const supabaseUrl = 'https://hnyqfasddflqzfibtjjz.supabase.co';
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IhueUEZhc2RkZmxxemZpYnRqamsic3ViIjoiYW5vbiIsImlhdCI6MTcyNDE1MDI2NSwiZXhwIjoyMDM5NzI2MjY1fQ.your-actual-key-here';
+        
+        const supabase = createClient(supabaseUrl, supabaseKey);
+
+        window.testQuery = async function() {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = 'Testing...';
+
+            try {
+                // Test authentication first
+                const { data: { user }, error: authError } = await supabase.auth.getUser();
+                console.log('Auth status:', { user: user?.id, error: authError });
+
+                // Test the problematic query
+                const result = await supabase
+                    .from('payroll_periods')
+                    .select('*')
+                    .eq('organization_id', '550e8400-e29b-41d4-a716-446655440000')
+                    .eq('month', 9)
+                    .eq('year', 2025);
+
+                console.log('Query result:', result);
+                resultsDiv.innerHTML = `
+                    <h3>Query Result:</h3>
+                    <pre>${JSON.stringify(result, null, 2)}</pre>
+                `;
+            } catch (error) {
+                console.error('Error:', error);
+                resultsDiv.innerHTML = `
+                    <h3>Error:</h3>
+                    <pre>${JSON.stringify(error, null, 2)}</pre>
+                `;
+            }
+        };
+    </script>
+</body>
+</html>

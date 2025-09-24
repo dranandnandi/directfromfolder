@@ -46,8 +46,8 @@ function isErrorWithMessage(error: any): error is { message: string } {
   return error && typeof error === 'object' && typeof error.message === 'string';
 }
 
-export async function retryOperation<T>(
-  operation: () => Promise<T>,
+export async function retryOperation<T = any>(
+  operation: () => Promise<T> | PromiseLike<T>,
   maxRetries: number = 2,
   delay: number = 1000
 ): Promise<T> {
