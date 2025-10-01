@@ -78,6 +78,15 @@ Deploy-Function "ai-compensation-assistant"
 Deploy-Function "ai-compensation-chat"
 Deploy-Function "ai-component-mapper"
 
+# Attendance Import Workflow Functions
+Deploy-Function "attendance-latest-batch-for-period"
+Deploy-Function "attendance-upload-file"
+Deploy-Function "attendance-upload-file-chunk"
+Deploy-Function "attendance-detect-format"
+Deploy-Function "attendance-save-mapping"
+Deploy-Function "attendance-parse-and-stage"
+Deploy-Function "attendance-discard-batch"
+
 Write-Host "\n✔ All edge functions deployed successfully!" -ForegroundColor Green
 Write-Host "\nNext steps:" -ForegroundColor Cyan
 Write-Host "1) Ensure required environment variables are configured in your Supabase project:" -ForegroundColor White

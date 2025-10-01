@@ -22,6 +22,7 @@ const AttendanceDashboard = lazy(() => import('./components/hr/AttendanceDashboa
 
 // Payroll system lazy imports
 const PayrollShell = lazy(() => import('./payroll/PayrollShell'));
+const PayrollPreview = lazy(() => import('./payroll/PayrollPreview'));
 const MyPayslip = lazy(() => import('./me/MyPayslip'));
 
 import { Task, TaskType, User, OrganizationSettings, TaskStatus, TaskPriority } from './models/task';
@@ -1046,6 +1047,17 @@ function App() {
               </Suspense>
             } />
             {/* Payroll System Routes */}
+            <Route path="/payroll-preview" element={
+              <Suspense fallback={<div className="p-4">Loading payroll preview...</div>}>
+                {userOrganizationId ? (
+                  <OrganizationProvider organizationId={userOrganizationId}>
+                    <PayrollPreview />
+                  </OrganizationProvider>
+                ) : (
+                  <div className="p-4">Loading organization...</div>
+                )}
+              </Suspense>
+            } />
             <Route path="/payroll/*" element={
               <ProtectedRoute allowedRoles={['admin', 'payroll_admin']}>
                 <Suspense fallback={<div className="p-4">Loading payroll...</div>}>

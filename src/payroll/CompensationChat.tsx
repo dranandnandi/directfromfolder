@@ -172,7 +172,7 @@ export default function CompensationChatUI({ currentCompensation, availableCompo
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [unmappedComponents, setUnmappedComponents] = useState<UnmappedComponent[]>([]);
-  const [showUnmapped, setShowUnmapped] = useState(true);
+  // const [showUnmapped, setShowUnmapped] = useState(true); // Unused for now
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Build canonical map once from available components
@@ -237,7 +237,7 @@ export default function CompensationChatUI({ currentCompensation, availableCompo
     } finally { setIsLoading(false); }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } };
+  // const handleKeyPress = (e: React.KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }; // Unused for now
 
   return (
     <div className="border rounded-lg bg-white shadow-sm">

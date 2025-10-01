@@ -9,6 +9,7 @@ import UploadAndMap from "./AttendanceImportWizard/UploadAndMap";
 import ReviewValidate from "./AttendanceImportWizard/ReviewValidate";
 import ApplyOverrides from "./AttendanceImportWizard/ApplyOverrides";
 import CompensationEditor from "./CompensationEditor";
+import PayrollPreview from "./PayrollPreview";
 
 /** =======================
  *  Context (exact values used across the module)
@@ -64,6 +65,8 @@ function Header({
         <div className="flex items-center gap-4">
           <div className="text-lg font-semibold text-gray-900">Payroll</div>
           <nav className="flex items-center gap-2 text-sm">
+            <Tab to="/payroll/compensation">Comp Editor</Tab>
+            <Tab to="/payroll/preview">Preview</Tab>
             <Tab to="/payroll">Dashboard</Tab>
             <Tab to="/payroll/period-board">Period Board</Tab>
             <Tab to="/payroll/statutory">Statutory</Tab>
@@ -71,7 +74,6 @@ function Header({
             <Tab to="/payroll/import/upload">Upload</Tab>
             <Tab to="/payroll/import/review">Review</Tab>
             <Tab to="/payroll/import/overrides">Overrides</Tab>
-            <Tab to="/payroll/compensation">Comp Editor</Tab>
           </nav>
         </div>
 
@@ -183,6 +185,7 @@ function InnerShell() {
       <main className="max-w-7xl mx-auto px-4 py-6">
         <Routes>
           <Route path="/" element={<PayrollAdminHome />} />
+          <Route path="/preview" element={<PayrollPreview />} />
           <Route path="/period-board" element={<PayrollPeriodBoard />} />
           <Route path="/statutory" element={<StatutoryCenter />} />
           <Route path="/settings" element={<PayrollSettings />} />

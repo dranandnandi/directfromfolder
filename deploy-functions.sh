@@ -5,13 +5,35 @@
 
 echo "🚀 Deploying Supabase Edge Functions..."
 
-# Deploy process-conversation function (main audio processing)
+# Deploy conversation functions
 echo "📼 Deploying process-conversation function..."
 supabase functions deploy process-conversation
 
-# Deploy analyze-conversation function (manual analysis)
-echo "🔍 Deploying analyze-conversation function..."
+echo "� Deploying analyze-conversation function..."
 supabase functions deploy analyze-conversation
+
+# Deploy AI functions
+echo "🧠 Deploying AI functions..."
+supabase functions deploy ai-ctc-composer
+supabase functions deploy ai-attendance-import-intake
+supabase functions deploy ai-attendance-import-validate-apply
+supabase functions deploy ai-payroll-audit
+supabase functions deploy ai-compliance-explainer
+supabase functions deploy ai-challan-assist
+supabase functions deploy ai-attendance-basis-explain
+supabase functions deploy ai-compensation-assistant
+supabase functions deploy ai-compensation-chat
+supabase functions deploy ai-component-mapper
+
+# Deploy attendance import workflow functions
+echo "� Deploying attendance import functions..."
+supabase functions deploy attendance-latest-batch-for-period
+supabase functions deploy attendance-upload-file
+supabase functions deploy attendance-upload-file-chunk
+supabase functions deploy attendance-detect-format
+supabase functions deploy attendance-save-mapping
+supabase functions deploy attendance-parse-and-stage
+supabase functions deploy attendance-discard-batch
 
 echo "✅ All edge functions deployed successfully!"
 echo ""

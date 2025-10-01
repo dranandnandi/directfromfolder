@@ -239,7 +239,7 @@ export default function CompensationEditor() {
       };
       
       // Apply mappings to find the best match
-      editData.compensation_payload.components = editData.compensation_payload.components.map(comp => {
+      editData.compensation_payload.components = editData.compensation_payload.components.map((comp: any) => {
         let mappedCode = comp.component_code;
         
         // Try direct mapping first

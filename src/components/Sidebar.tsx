@@ -166,13 +166,20 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
             >
               Leave Management
             </MenuItem>
+            <MenuItem 
+              icon={HiCurrencyDollar}
+              to="/payroll-preview"
+              active={activeView === 'payroll-preview'}
+            >
+              Payroll Preview
+            </MenuItem>
             {(userRole === 'admin' || userRole === 'superadmin') && (
               <MenuItem 
                 icon={HiCurrencyDollar}
                 to="/payroll"
                 active={activeView === 'payroll'}
               >
-                Payroll
+                Payroll System
               </MenuItem>
             )}
             {(userRole !== 'admin' && userRole !== 'superadmin') && (

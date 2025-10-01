@@ -32,7 +32,7 @@ export const fetchPayrollPeriod = async (
 
   return retryOperation(async () => {
     const { data, error } = await supabase
-      .from<PayrollPeriodRow>('payroll_periods')
+      .from('payroll_periods')
       .select('*')
       .eq('organization_id', organizationId)
       .eq('month', month)
