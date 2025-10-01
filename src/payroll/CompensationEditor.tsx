@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../utils/supabaseClient";
 import { useOrganization } from "../contexts/OrganizationContext";
 import { PageHeader, AsyncSection, EmptyState } from "./widgets/Primitives";
-import CompensationChat from "./CompensationChat";
+import CompensationChat from "./CompensationChatNew";
 
 /** ================= Schema-aligned types ================= */
 type PayComponent = {
@@ -92,6 +92,9 @@ export default function CompensationEditor() {
 
         if (error) throw new Error(error.message);
         setComponents(components || []);
+        
+        // Debug: Log available component codes
+        console.log('Available component codes:', components?.map(c => c.code) || []);
       } catch (e: any) {
         console.error(e);
       }
@@ -183,7 +186,87 @@ export default function CompensationEditor() {
   }
 
   function beginEdit(r: CompensationRow) {
-    setEditing(JSON.parse(JSON.stringify(r)));
+    const editData = JSON.parse(JSON.stringify(r));
+    
+    // Fix component code mismatches by mapping to available codes
+    if (editData.compensation_payload?.components) {
+      const availableCodes = components.map(c => c.code);
+      
+      // Create a mapping from saved codes to available codes
+      const codeMapping: Record<string, string> = {};
+      availableCodes.forEach(code => {
+        codeMapping[code] = code; // exact match
+        codeMapping[code.toLowerCase()] = code; // lowercase to exact
+        codeMapping[code.toUpperCase()] = code; // uppercase to exact
+      });
+      
+      // Common aliases mapping
+      const aliases: Record<string, string> = {
+        'basic': 'BASIC',
+        'BASIC': 'BASIC', 
+        'hra': 'HRA',
+        'HRA': 'HRA',
+        'conveyance': 'CONV',
+        'CONV': 'CONV',
+        'conv': 'CONV',
+        'special': 'SPEC',
+        'SPEC': 'SPEC',
+        'spec': 'SPEC',
+        'MED': 'MED',
+        'medical': 'MED',
+        'med': 'MED',
+        'PF_EE': 'PF',
+        'pf_employee': 'PF',
+        'PF': 'PF',
+        'pf': 'PF',
+        'PT': 'PT',
+        'pt': 'PT',
+        'TDS': 'TDS',
+        'tds': 'TDS',
+        'esic_employee': 'ESI',
+        'ESI': 'ESI',
+        'esi': 'ESI',
+        'ESIC': 'ESI',
+        // Employer contributions
+        'PF_ER': 'PF_ER',
+        'pf_er': 'PF_ER',
+        'pf_employer': 'PF_ER',
+        'ESI_ER': 'ESI_ER',
+        'esi_er': 'ESI_ER',
+        'esic_er': 'ESI_ER',
+        'esi_employer': 'ESI_ER',
+        'esic_employer': 'ESI_ER'
+      };
+      
+      // Apply mappings to find the best match
+      editData.compensation_payload.components = editData.compensation_payload.components.map(comp => {
+        let mappedCode = comp.component_code;
+        
+        // Try direct mapping first
+        if (codeMapping[comp.component_code]) {
+          mappedCode = codeMapping[comp.component_code];
+        }
+        // Try alias mapping
+        else if (aliases[comp.component_code] && availableCodes.includes(aliases[comp.component_code])) {
+          mappedCode = aliases[comp.component_code];
+        }
+        // Try to find a case-insensitive match
+        else {
+          const match = availableCodes.find(code => 
+            code.toLowerCase() === comp.component_code.toLowerCase()
+          );
+          if (match) mappedCode = match;
+        }
+        
+        if (mappedCode !== comp.component_code) {
+          console.log(`Mapped component code: ${comp.component_code} → ${mappedCode}`);
+        }
+        
+        return { ...comp, component_code: mappedCode };
+      });
+    }
+    
+    setEditing(editData);
   }
 
   async function saveRow() {
@@ -294,46 +377,100 @@ export default function CompensationEditor() {
   async function doPreview(targetId: string) {
     setPreviewBusy(true);
     try {
-      // For now, create a simplified preview without complex calculations
-      // In a full implementation, this would involve payroll calculation logic
       const compensationRow = rows.find(r => r.id === targetId);
       if (!compensationRow) {
         throw new Error("Compensation record not found");
       }
 
-      // Create a basic preview structure
-      const monthlyGross = compensationRow.ctc_annual / 12;
-      const basicPreview: PreviewResponse = {
+      console.log('Preview - Original compensation components:', compensationRow.compensation_payload.components);
+
+      // Apply same component code mapping logic as beginEdit function
+      const savedComponents = compensationRow.compensation_payload.components || [];
+      const previewSnapshot: { code: string; name: string; type: 'earning' | 'deduction' | 'employer_cost'; amount: number }[] = [];
+
+      for (const savedComp of savedComponents) {
+        const savedCode = savedComp.component_code?.trim();
+        if (!savedCode) continue;
+
+        // Try to map component code using same logic as beginEdit
+        let matchedComponent = null;
+
+        // 1. Exact match first
+        matchedComponent = components.find(c => c.code === savedCode);
+
+        // 2. Case-insensitive match
+        if (!matchedComponent) {
+          matchedComponent = components.find(c => c.code.toLowerCase() === savedCode.toLowerCase());
+        }
+
+        // 3. Common alias mapping
+        if (!matchedComponent) {
+          const aliasMap: Record<string, string> = {
+            'basic': 'BASIC',
+            'hra': 'HRA', 
+            'conv': 'CONV',
+            'conveyance': 'CONV',
+            'special': 'SPEC',
+            'spec': 'SPEC',
+            'medical': 'MED',
+            'med': 'MED',
+            'pf': 'PF',
+            'esi': 'ESI',
+            'pt': 'PT',
+            'tds': 'TDS',
+            // Employer contributions
+            'pf_er': 'PF_ER',
+            'pf_employer': 'PF_ER',
+            'esi_er': 'ESI_ER', 
+            'esic_er': 'ESI_ER',
+            'esi_employer': 'ESI_ER',
+            'esic_employer': 'ESI_ER'
+          };
+          
+          const normalizedAlias = aliasMap[savedCode.toLowerCase()];
+          if (normalizedAlias) {
+            matchedComponent = components.find(c => c.code === normalizedAlias);
+          }
+        }
+
+        if (matchedComponent) {
+          // Convert annual amount to monthly for preview display
+          const monthlyAmount = (savedComp.amount || 0) / 12;
+          previewSnapshot.push({
+            code: matchedComponent.code,
+            name: matchedComponent.name,
+            type: matchedComponent.type as 'earning' | 'deduction' | 'employer_cost',
+            amount: monthlyAmount
+          });
+        } else {
+          console.warn(`Preview - Component code "${savedCode}" not found in available components`);
+        }
+      }
+
+      // Calculate totals from actual components
+      const earnings = previewSnapshot.filter(s => s.type === 'earning');
+      const deductions = previewSnapshot.filter(s => s.type === 'deduction');
+      const employerCosts = previewSnapshot.filter(s => s.type === 'employer_cost');
+
+      const grossEarnings = earnings.reduce((sum, item) => sum + item.amount, 0);
+      const totalDeductions = Math.abs(deductions.reduce((sum, item) => sum + item.amount, 0)); // Make positive for display
+      const totalEmployerCost = employerCosts.reduce((sum, item) => sum + item.amount, 0);
+      const netPay = grossEarnings - totalDeductions;
+
+      const preview: PreviewResponse = {
         month: previewMonth,
         year: previewYear,
-        snapshot: [
-          {
-            code: 'BASIC',
-            name: 'Basic Salary',
-            type: 'earning',
-            amount: monthlyGross * 0.5
-          },
-          {
-            code: 'HRA',
-            name: 'House Rent Allowance',
-            type: 'earning',
-            amount: monthlyGross * 0.3
-          },
-          {
-            code: 'PF',
-            name: 'Provident Fund',
-            type: 'deduction',
-            amount: monthlyGross * 0.12
-          }
-        ],
-        gross_earnings: monthlyGross,
-        total_deductions: monthlyGross * 0.2,
-        net_pay: monthlyGross * 0.8,
-        employer_cost: monthlyGross * 1.15
+        snapshot: previewSnapshot,
+        gross_earnings: grossEarnings,
+        total_deductions: totalDeductions,
+        net_pay: netPay,
+        employer_cost: grossEarnings + totalEmployerCost // Basic employer cost calculation
       };
 
-      setPreview(basicPreview);
+      console.log('Preview - Final preview data:', preview);
+      setPreview(preview);
     } catch (e: any) {
+      console.error('Preview error:', e);
       alert(e?.message || "Preview failed");
     } finally {
       setPreviewBusy(false);
@@ -623,13 +760,6 @@ export default function CompensationEditor() {
                   {/* AI Assistant */}
                   <div className="mt-6">
                     <CompensationChat
-                      currentCompensation={{
-                        ctc_annual: editing.ctc_annual,
-                        pay_schedule: editing.pay_schedule,
-                        currency: editing.currency,
-                        components: editing.compensation_payload.components || [],
-                        notes: editing.compensation_payload.notes || ""
-                      }}
                       availableComponents={components.map(c => ({
                         code: c.code,
                         name: c.name,

@@ -75,6 +75,8 @@ Deploy-Function "ai-compliance-explainer"
 Deploy-Function "ai-challan-assist"
 Deploy-Function "ai-attendance-basis-explain"
 Deploy-Function "ai-compensation-assistant"
+Deploy-Function "ai-compensation-chat"
+Deploy-Function "ai-component-mapper"
 
 Write-Host "\n✔ All edge functions deployed successfully!" -ForegroundColor Green
 Write-Host "\nNext steps:" -ForegroundColor Cyan

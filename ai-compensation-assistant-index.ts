@@ -1,48 +1,9 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
-
-interface CompensationComponent {
-  component_code: string;
-  amount: number;
-}
-
-interface CompensationRequest {
-  user_input: string;
-  current_compensation?: {
-    ctc_annual: number;
-    pay_schedule: string;
-    currency: string;
-    components: CompensationComponent[];
-    notes?: string;
-  };
-  conversation_history?: Array<{
-    role: "user" | "assistant";
-    content: string;
-  }>;
-  available_components?: Array<{
-    code: string;
-    name: string;
-    type: "earning" | "deduction" | "employer_cost";
-  }>;
-}
-
-interface CompensationResponse {
-  compensation: {
-    ctc_annual: number;
-    pay_schedule: "monthly" | "weekly" | "biweekly";
-    currency: string;
-    components: CompensationComponent[];
-    notes: string;
-  };
-  explanation: string;
-  conversation_complete: boolean;
-  next_questions?: string[];
-}
-
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
+};
+// Update the SYSTEM_PROMPT to be more explicit about amounts
 const SYSTEM_PROMPT = `You are an expert Indian payroll compensation assistant. Your job is to help HR professionals structure employee compensation packages.
 
 Key Rules:
@@ -56,6 +17,8 @@ Key Rules:
 8. Set conversation_complete=true only when user says "done", "finalize", or similar
 9. Currency should be INR unless specified otherwise
 10. Pay schedule should default to "monthly" unless specified
+11. IMPORTANT: All component amounts in the response should be ANNUAL amounts (12 months total)
+12. The UI will convert these annual amounts to monthly display values
 
 Response Format (STRICT JSON):
 {
@@ -64,8 +27,8 @@ Response Format (STRICT JSON):
     "pay_schedule": "monthly" | "weekly" | "biweekly",
     "currency": "INR",
     "components": [
-      {"component_code": "BASIC", "amount": number},
-      {"component_code": "HRA", "amount": number}
+      {"component_code": "BASIC", "amount": number},  // Annual amount
+      {"component_code": "HRA", "amount": number}     // Annual amount
     ],
     "notes": "explanation of structure"
   },
@@ -74,151 +37,142 @@ Response Format (STRICT JSON):
   "next_questions": ["suggestion1", "suggestion2"]
 }
 
-Available Components Reference:
-- BASIC: Basic Salary (earning)
-- HRA: House Rent Allowance (earning) 
-- CONV: Conveyance Allowance (earning)
-- MED: Medical Allowance (earning)
-- SPEC: Special Allowance (earning)
-- PF: Provident Fund (deduction, negative)
-- ESI: Employee State Insurance (deduction, negative)
-- PT: Professional Tax (deduction, negative)
-- TDS: Tax Deducted at Source (deduction, negative)`;
-
-serve(async (req: Request) => {
+Available Components Reference (all amounts are ANNUAL):
+- BASIC: Basic Salary (earning) - annual amount
+- HRA: House Rent Allowance (earning) - annual amount
+- CONV: Conveyance Allowance (earning) - annual amount
+- MED: Medical Allowance (earning) - annual amount
+- SPEC: Special Allowance (earning) - annual amount
+- PF: Provident Fund (deduction, negative) - annual amount
+- ESI: Employee State Insurance (deduction, negative) - annual amount
+- PT: Professional Tax (deduction, negative) - annual amount
+- TDS: Tax Deducted at Source (deduction, negative) - annual amount`;
+serve(async (req)=>{
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+    return new Response('ok', {
+      headers: corsHeaders
+    });
   }
-
   if (req.method !== 'POST') {
-    return new Response(
-      JSON.stringify({ error: 'Method not allowed' }),
-      { 
-        status: 405, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+    return new Response(JSON.stringify({
+      error: 'Method not allowed'
+    }), {
+      status: 405,
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
       }
-    )
+    });
   }
-
   try {
-    const body: CompensationRequest = await req.json()
-    const { user_input, current_compensation, conversation_history, available_components } = body
-
+    const body = await req.json();
+    const { user_input, current_compensation, conversation_history, available_components } = body;
     if (!user_input) {
-      return new Response(
-        JSON.stringify({ error: 'Missing user_input' }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      return new Response(JSON.stringify({
+        error: 'Missing user_input'
+      }), {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
         }
-      )
+      });
     }
-
     // Build context for the AI
-    let contextPrompt = ""
-    
+    let contextPrompt = "";
     if (current_compensation) {
-      contextPrompt += `\nCURRENT COMPENSATION:\n${JSON.stringify(current_compensation, null, 2)}`
+      contextPrompt += `\nCURRENT COMPENSATION:\n${JSON.stringify(current_compensation, null, 2)}`;
     }
-
     if (available_components) {
-      contextPrompt += `\nAVAILABLE COMPONENTS:\n${available_components.map(c => `${c.code}: ${c.name} (${c.type})`).join('\n')}`
+      contextPrompt += `\nAVAILABLE COMPONENTS:\n${available_components.map((c)=>`${c.code}: ${c.name} (${c.type})`).join('\n')}`;
     }
-
     if (conversation_history && conversation_history.length > 0) {
-      contextPrompt += `\nCONVERSATION HISTORY:\n${conversation_history.map(msg => `${msg.role}: ${msg.content}`).join('\n')}`
+      contextPrompt += `\nCONVERSATION HISTORY:\n${conversation_history.map((msg)=>`${msg.role}: ${msg.content}`).join('\n')}`;
     }
-
-    const prompt = `${SYSTEM_PROMPT}${contextPrompt}\n\nUSER INPUT: ${user_input}\n\nProvide compensation structure as JSON:`
-
+    const prompt = `${SYSTEM_PROMPT}${contextPrompt}\n\nUSER INPUT: ${user_input}\n\nProvide compensation structure as JSON:`;
     // Call Gemini API
-    const GOOGLE_AI_API_KEY = Deno.env.get('ALLGOOGLE_KEY')
+    const GOOGLE_AI_API_KEY = Deno.env.get('ALLGOOGLE_KEY');
     if (!GOOGLE_AI_API_KEY) {
-      throw new Error('Missing ALLGOOGLE_KEY environment variable')
+      throw new Error('Missing ALLGOOGLE_KEY environment variable');
     }
-
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GOOGLE_AI_API_KEY}`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text: prompt
-          }]
-        }],
+        contents: [
+          {
+            parts: [
+              {
+                text: prompt
+              }
+            ]
+          }
+        ],
         generationConfig: {
           temperature: 0.7,
           topK: 40,
           topP: 0.95,
-          maxOutputTokens: 2048,
+          maxOutputTokens: 2048
         }
       })
-    })
-
+    });
     if (!response.ok) {
-      const errorText = await response.text()
-      console.error('Gemini API error:', errorText)
-      throw new Error(`Gemini API error: ${response.status}`)
+      const errorText = await response.text();
+      console.error('Gemini API error:', errorText);
+      throw new Error(`Gemini API error: ${response.status}`);
     }
-
-    const aiResponse = await response.json()
-    
+    const aiResponse = await response.json();
     if (!aiResponse.candidates || aiResponse.candidates.length === 0) {
-      throw new Error('No response from AI')
+      throw new Error('No response from AI');
     }
-
-    let aiText = aiResponse.candidates[0].content.parts[0].text
-
+    let aiText = aiResponse.candidates[0].content.parts[0].text;
     // Clean up the response - extract JSON from markdown if needed
-    let cleanedText = aiText
+    let cleanedText = aiText;
     if (aiText.includes('```json')) {
-      const jsonMatch = aiText.match(/```json\n?(.*?)\n?```/s)
+      const jsonMatch = aiText.match(/```json\n?(.*?)\n?```/s);
       if (jsonMatch) {
-        cleanedText = jsonMatch[1]
+        cleanedText = jsonMatch[1];
       }
     } else if (aiText.includes('```')) {
-      const jsonMatch = aiText.match(/```\n?(.*?)\n?```/s)
+      const jsonMatch = aiText.match(/```\n?(.*?)\n?```/s);
       if (jsonMatch) {
-        cleanedText = jsonMatch[1]
+        cleanedText = jsonMatch[1];
       }
     }
-
     // Parse the AI response
-    let compensationResponse: CompensationResponse
+    let compensationResponse;
     try {
-      compensationResponse = JSON.parse(cleanedText.trim())
+      compensationResponse = JSON.parse(cleanedText.trim());
     } catch (parseError) {
-      console.error('Failed to parse AI response:', aiText)
-      throw new Error('Invalid AI response format')
+      console.error('Failed to parse AI response:', aiText);
+      throw new Error('Invalid AI response format');
     }
-
     // Validate the response structure
     if (!compensationResponse.compensation || !compensationResponse.explanation) {
-      throw new Error('Invalid compensation response structure')
+      throw new Error('Invalid compensation response structure');
     }
-
     // Ensure required fields
     if (!compensationResponse.compensation.components || !Array.isArray(compensationResponse.compensation.components)) {
-      compensationResponse.compensation.components = []
+      compensationResponse.compensation.components = [];
     }
-
-    return new Response(
-      JSON.stringify(compensationResponse),
-      { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+    return new Response(JSON.stringify(compensationResponse), {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
       }
-    )
-
-  } catch (error: any) {
-    console.error('Compensation AI error:', error)
-    return new Response(
-      JSON.stringify({ error: error.message || 'Internal server error' }),
-      { 
-        status: 500, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+    });
+  } catch (error) {
+    console.error('Compensation AI error:', error);
+    return new Response(JSON.stringify({
+      error: error.message || 'Internal server error'
+    }), {
+      status: 500,
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
       }
-    )
+    });
   }
-})
+});
