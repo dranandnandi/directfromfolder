@@ -10,6 +10,7 @@ export interface Shift {
   late_threshold_minutes: number;
   early_out_threshold_minutes: number;
   is_active: boolean;
+  is_overnight?: boolean; // True if shift spans midnight (e.g., 8 PM to 8 AM) - optional, auto-detected
   created_at: string;
   updated_at: string;
 }
@@ -36,7 +37,7 @@ export interface Attendance {
   organization_id: string;
   date: string; // YYYY-MM-DD format
   shift_id?: string;
-  
+
   // Punch In Data
   punch_in_time?: string;
   punch_in_latitude?: number;
@@ -44,7 +45,7 @@ export interface Attendance {
   punch_in_address?: string;
   punch_in_selfie_url?: string;
   punch_in_device_info?: any;
-  
+
   // Punch Out Data
   punch_out_time?: string;
   punch_out_latitude?: number;
@@ -52,28 +53,28 @@ export interface Attendance {
   punch_out_address?: string;
   punch_out_selfie_url?: string;
   punch_out_device_info?: any;
-  
+
   // Calculated Fields
   total_hours?: number;
   break_hours: number;
   effective_hours?: number;
-  
+
   // Status Flags
   is_late: boolean;
   is_early_out: boolean;
   is_absent: boolean;
   is_holiday: boolean;
   is_weekend: boolean;
-  
+
   // Regularization
   is_regularized: boolean;
   regularized_by?: string;
   regularization_reason?: string;
   regularized_at?: string;
-  
+
   created_at: string;
   updated_at: string;
-  
+
   // Populated when joined
   shift?: Shift;
   user?: {
@@ -93,7 +94,7 @@ export interface AttendanceRegularization {
   status: 'pending' | 'approved' | 'rejected';
   created_at: string;
   updated_at: string;
-  
+
   // Populated when joined
   attendance?: Attendance;
   requester?: {

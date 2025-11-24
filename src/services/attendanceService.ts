@@ -2,46 +2,52 @@ import { supabase } from '../utils/supabaseClient';
 import { Shift, EmployeeShift, Attendance, AttendanceRegularization, PunchData, AttendanceSummary } from '../models/attendance';
 
 export class AttendanceService {
-  
+
   // ========== SHIFT MANAGEMENT ==========
-  
+
   static async createShift(shift: Omit<Shift, 'id' | 'created_at' | 'updated_at'>): Promise<Shift> {
     console.log('Creating shift:', shift);
-    
+
+    // Auto-detect overnight shift if not explicitly set
+    const shiftData = {
+      ...shift,
+      is_overnight: shift.is_overnight ?? (shift.end_time < shift.start_time)
+    };
+
     const { data, error } = await supabase
       .from('shifts')
-      .insert(shift)
+      .insert(shiftData)
       .select()
       .single();
-    
+
     if (error) {
       console.error('Error creating shift:', error);
       throw error;
     }
-    
+
     console.log('Shift created successfully:', data);
     return data;
   }
-  
+
   static async getShiftsByOrganization(organizationId: string): Promise<Shift[]> {
     console.log('Fetching shifts for organization:', organizationId);
-    
+
     const { data, error } = await supabase
       .from('shifts')
       .select('*')
       .eq('organization_id', organizationId)
       .eq('is_active', true)
       .order('name');
-    
+
     if (error) {
       console.error('Error fetching shifts:', error);
       throw error;
     }
-    
+
     console.log('Fetched shifts data:', data);
     return data || [];
   }
-  
+
   static async updateShift(id: string, updates: Partial<Shift>): Promise<Shift> {
     const { data, error } = await supabase
       .from('shifts')
@@ -49,27 +55,27 @@ export class AttendanceService {
       .eq('id', id)
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   }
-  
+
   static async deleteShift(id: string): Promise<void> {
     const { error } = await supabase
       .from('shifts')
       .update({ is_active: false })
       .eq('id', id);
-    
+
     if (error) throw error;
   }
-  
+
   // ========== EMPLOYEE SHIFT ASSIGNMENT ==========
-  
+
   static async assignShiftToEmployee(assignment: Omit<EmployeeShift, 'id' | 'created_at'>): Promise<EmployeeShift> {
     // First, end any existing active assignments for this user on or after the effective date
     const { error: updateError } = await supabase
       .from('employee_shifts')
-      .update({ 
+      .update({
         effective_to: new Date(new Date(assignment.effective_from).getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0] // Day before new assignment
       })
       .eq('user_id', assignment.user_id)
@@ -84,7 +90,7 @@ export class AttendanceService {
     // Also end any existing assignments that overlap with the new effective date
     const { error: overlapError } = await supabase
       .from('employee_shifts')
-      .update({ 
+      .update({
         effective_to: new Date(new Date(assignment.effective_from).getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0]
       })
       .eq('user_id', assignment.user_id)
@@ -101,7 +107,7 @@ export class AttendanceService {
       .insert(assignment)
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   }
@@ -109,14 +115,14 @@ export class AttendanceService {
   static async reassignEmployeeShift(userId: string, newShiftId: string, effectiveFrom: string, assignedBy: string): Promise<EmployeeShift> {
     // This method specifically handles reassigning an employee to a new shift
     // It ends the current assignment and creates a new one
-    
+
     const today = new Date().toISOString().split('T')[0];
     const effectiveDate = effectiveFrom || today;
-    
+
     // End current active assignment
     const { error: endCurrentError } = await supabase
       .from('employee_shifts')
-      .update({ 
+      .update({
         effective_to: new Date(new Date(effectiveDate).getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0]
       })
       .eq('user_id', userId)
@@ -136,10 +142,10 @@ export class AttendanceService {
 
     return this.assignShiftToEmployee(newAssignment);
   }
-  
+
   static async getEmployeeCurrentShift(userId: string): Promise<EmployeeShift | null> {
     const today = new Date().toISOString().split('T')[0];
-    
+
     const { data, error } = await supabase
       .from('employee_shifts')
       .select(`
@@ -152,11 +158,11 @@ export class AttendanceService {
       .order('effective_from', { ascending: false })
       .limit(1)
       .single();
-    
+
     if (error && error.code !== 'PGRST116') throw error;
     return data || null;
   }
-  
+
   static async getShiftAssignments(organizationId: string): Promise<EmployeeShift[]> {
     const { data, error } = await supabase
       .from('employee_shifts')
@@ -167,31 +173,31 @@ export class AttendanceService {
       `)
       .eq('shift.organization_id', organizationId)
       .order('effective_from', { ascending: false });
-    
+
     if (error) throw error;
     return data || [];
   }
-  
+
   // ========== ATTENDANCE TRACKING ==========
-  
+
   static async punchIn(userId: string, punchData: PunchData): Promise<Attendance> {
     const today = new Date().toISOString().split('T')[0];
     const currentTime = new Date().toISOString();
-    
+
     // Get user's organization and current shift
     const { data: userData } = await supabase
       .from('users')
       .select('organization_id')
       .eq('id', userId)
       .single();
-    
+
     if (!userData) throw new Error('User not found');
-    
+
     const currentShift = await this.getEmployeeCurrentShift(userId);
-    
+
     // Upload selfie
     const selfieUrl = await this.uploadSelfie(punchData.selfie_file, userId, 'punch_in', userData.organization_id);
-    
+
     // Create or update attendance record
     const attendanceData = {
       user_id: userId,
@@ -205,33 +211,67 @@ export class AttendanceService {
       punch_in_selfie_url: selfieUrl,
       punch_in_device_info: punchData.device_info,
     };
-    
+
     const { data, error } = await supabase
       .from('attendance')
       .upsert(attendanceData, { onConflict: 'user_id,date' })
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   }
-  
+
   static async punchOut(userId: string, punchData: PunchData): Promise<Attendance> {
-    const today = new Date().toISOString().split('T')[0];
     const currentTime = new Date().toISOString();
-    
+
     // Get user's organization
     const { data: userData } = await supabase
       .from('users')
       .select('organization_id')
       .eq('id', userId)
       .single();
-    
+
     if (!userData) throw new Error('User not found');
-    
+
+    // Find active punch-in record (look back 2 days for overnight shifts)
+    const twoDaysAgo = new Date();
+    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+    const searchFromDate = twoDaysAgo.toISOString().split('T')[0];
+
+    const { data: activeRecord, error: activeError } = await supabase
+      .from('attendance')
+      .select('*, shift:shifts(id, name, is_overnight)')
+      .eq('user_id', userId)
+      .gte('date', searchFromDate)
+      .not('punch_in_time', 'is', null)
+      .is('punch_out_time', null)  // Find unpunched-out record
+      .order('punch_in_time', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (activeError || !activeRecord) {
+      throw new Error('No active punch-in found. Please punch in first.');
+    }
+
+    // Validate duration for overnight shifts
+    if (activeRecord.shift?.is_overnight) {
+      const punchInDate = new Date(activeRecord.punch_in_time);
+      const punchOutDate = new Date(currentTime);
+      const hoursDiff = (punchOutDate.getTime() - punchInDate.getTime()) / (1000 * 60 * 60);
+
+      if (hoursDiff < 6) {
+        throw new Error('Too early to punch out. Minimum 6 hours required for overnight shifts.');
+      }
+      if (hoursDiff > 18) {
+        throw new Error('Exceeds maximum shift duration of 18 hours.');
+      }
+    }
+
     // Upload selfie
     const selfieUrl = await this.uploadSelfie(punchData.selfie_file, userId, 'punch_out', userData.organization_id);
-    
+
+    // Update by ID (not date) to handle overnight shifts correctly
     const { data, error } = await supabase
       .from('attendance')
       .update({
@@ -242,18 +282,17 @@ export class AttendanceService {
         punch_out_selfie_url: selfieUrl,
         punch_out_device_info: punchData.device_info,
       })
-      .eq('user_id', userId)
-      .eq('date', today)
+      .eq('id', activeRecord.id)  // Update by ID, not by date
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   }
-  
+
   static async getTodayAttendance(userId: string): Promise<Attendance | null> {
     const today = new Date().toISOString().split('T')[0];
-    
+
     const { data, error } = await supabase
       .from('attendance')
       .select(`
@@ -263,11 +302,11 @@ export class AttendanceService {
       .eq('user_id', userId)
       .eq('date', today)
       .single();
-    
+
     if (error && error.code !== 'PGRST116') throw error;
     return data || null;
   }
-  
+
   static async getAttendanceHistory(userId: string, fromDate: string, toDate: string): Promise<Attendance[]> {
     const { data, error } = await supabase
       .from('attendance')
@@ -279,11 +318,11 @@ export class AttendanceService {
       .gte('date', fromDate)
       .lte('date', toDate)
       .order('date', { ascending: false });
-    
+
     if (error) throw error;
     return data || [];
   }
-  
+
   static async getOrganizationAttendance(organizationId: string, date: string): Promise<Attendance[]> {
     const { data, error } = await supabase
       .from('attendance')
@@ -295,24 +334,24 @@ export class AttendanceService {
       .eq('organization_id', organizationId)
       .eq('date', date)
       .order('punch_in_time', { ascending: true });
-    
+
     if (error) throw error;
     return data || [];
   }
-  
+
   // ========== REGULARIZATION ==========
-  
+
   static async createRegularizationRequest(request: Omit<AttendanceRegularization, 'id' | 'status' | 'created_at' | 'updated_at'>): Promise<AttendanceRegularization> {
     const { data, error } = await supabase
       .from('attendance_regularizations')
       .insert({ ...request, status: 'pending' })
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   }
-  
+
   static async approveRegularization(id: string, adminId: string, remarks?: string): Promise<void> {
     const { error } = await supabase
       .from('attendance_regularizations')
@@ -323,16 +362,16 @@ export class AttendanceService {
         updated_at: new Date().toISOString()
       })
       .eq('id', id);
-    
+
     if (error) throw error;
-    
+
     // Update attendance record
     const { data: regularization } = await supabase
       .from('attendance_regularizations')
       .select('attendance_id')
       .eq('id', id)
       .single();
-    
+
     if (regularization) {
       await supabase
         .from('attendance')
@@ -345,7 +384,7 @@ export class AttendanceService {
         .eq('id', regularization.attendance_id);
     }
   }
-  
+
   static async rejectRegularization(id: string, adminId: string, remarks?: string): Promise<void> {
     const { error } = await supabase
       .from('attendance_regularizations')
@@ -356,10 +395,10 @@ export class AttendanceService {
         updated_at: new Date().toISOString()
       })
       .eq('id', id);
-    
+
     if (error) throw error;
   }
-  
+
   static async getPendingRegularizations(organizationId: string): Promise<AttendanceRegularization[]> {
     const { data, error } = await supabase
       .from('attendance_regularizations')
@@ -371,13 +410,13 @@ export class AttendanceService {
       .eq('attendance.organization_id', organizationId)
       .eq('status', 'pending')
       .order('created_at', { ascending: true });
-    
+
     if (error) throw error;
     return data || [];
   }
-  
+
   // ========== UTILITY FUNCTIONS ==========
-  
+
   static async uploadSelfie(file: File, userId: string, type: 'punch_in' | 'punch_out', organizationId: string): Promise<string> {
     try {
       // Create organized folder structure: attendance/orgId/year/month/day/userId/type_timestamp.jpg
@@ -387,21 +426,21 @@ export class AttendanceService {
       const day = String(now.getDate()).padStart(2, '0'); // 01-31
       const timestamp = now.getTime();
       const fileName = `attendance/${organizationId}/${year}/${month}/${day}/${userId}/${type}_${timestamp}.jpg`;
-      
+
       const { error } = await supabase.storage
         .from('attendance-selfies')
         .upload(fileName, file);
-      
+
       if (error) {
         console.error('Storage upload error:', error);
         // Return a placeholder URL if upload fails
         return `placeholder-${type}-${timestamp}`;
       }
-      
+
       const { data: urlData } = supabase.storage
         .from('attendance-selfies')
         .getPublicUrl(fileName);
-      
+
       return urlData.publicUrl;
     } catch (error) {
       console.error('Error uploading selfie:', error);
@@ -410,21 +449,21 @@ export class AttendanceService {
       return `placeholder-${type}-${timestamp}`;
     }
   }
-  
+
   static async getAttendanceSummary(userId: string, month: string): Promise<AttendanceSummary> {
     const startDate = `${month}-01`;
     const endDate = new Date(new Date(month + '-01').getFullYear(), new Date(month + '-01').getMonth() + 1, 0)
       .toISOString().split('T')[0];
-    
+
     const { data, error } = await supabase
       .from('attendance')
       .select('*')
       .eq('user_id', userId)
       .gte('date', startDate)
       .lte('date', endDate);
-    
+
     if (error) throw error;
-    
+
     const attendanceRecords = data || [];
     const totalDays = attendanceRecords.length;
     const presentDays = attendanceRecords.filter(a => a.punch_in_time).length;
@@ -434,7 +473,7 @@ export class AttendanceService {
     const totalHours = attendanceRecords.reduce((sum, a) => sum + (a.effective_hours || 0), 0);
     const lwpDays = attendanceRecords.filter(a => a.is_absent && !a.is_holiday && !a.is_weekend).length;
     const regularizedDays = attendanceRecords.filter(a => a.is_regularized).length;
-    
+
     return {
       total_days: totalDays,
       present_days: presentDays,
@@ -447,14 +486,14 @@ export class AttendanceService {
       regularized_days: regularizedDays
     };
   }
-  
+
   static getCurrentLocation(): Promise<{ latitude: number; longitude: number }> {
     return new Promise((resolve, reject) => {
       if (!navigator.geolocation) {
         reject(new Error('Geolocation is not supported'));
         return;
       }
-      
+
       navigator.geolocation.getCurrentPosition(
         (position) => {
           resolve({
@@ -467,7 +506,7 @@ export class AttendanceService {
       );
     });
   }
-  
+
   static async getAddressFromCoordinates(latitude: number, longitude: number): Promise<string> {
     try {
       const response = await fetch(
