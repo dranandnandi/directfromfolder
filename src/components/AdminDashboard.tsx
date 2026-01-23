@@ -9,13 +9,34 @@ import {
   HiXCircle,
   HiDownload,
   HiFilter,
-  HiSearch
+  HiSearch,
+  HiChatAlt2,
+  HiPhone,
+  HiEye,
+  HiX,
+  HiFolder
 } from 'react-icons/hi';
 import { supabase } from '../utils/supabaseClient';
 import WhatsAppAdminPanel from './WhatsAppAdminPanel';
+import { sendWhatsAppMessage } from '../utils/whatsappUtils';
 import AttendanceDashboard from './hr/AttendanceDashboard';
 import ShiftManagement from './hr/ShiftManagement';
 import EmployeeShiftManagement from './hr/EmployeeShiftManagement';
+import DocumentManagement from './hr/DocumentManagement';
+
+// Helper function to generate smart WhatsApp links (mobile vs desktop)
+const generateWhatsAppLink = (phoneNumber: string, message: string) => {
+  const encodedMessage = encodeURIComponent(message);
+  const formattedNumber = phoneNumber.replace(/^\+91/, '').replace(/\D/g, '');
+
+  // Detect if user is on mobile device
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const baseURL = isMobile
+    ? "https://api.whatsapp.com/send"
+    : "https://web.whatsapp.com/send";
+
+  return `${baseURL}?phone=91${formattedNumber}&text=${encodedMessage}`;
+};
 
 interface EmployeeMetrics {
   id: string;
@@ -75,7 +96,9 @@ interface AdminDashboardProps {
 const AdminDashboard: React.FC<AdminDashboardProps> = ({
   adminUserId
 }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'shifts' | 'employees' | 'conversations' | 'leaves' | 'whatsapp'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'shifts' | 'employees' | 'conversations' | 'leaves' | 'whatsapp' | 'documents'>('dashboard');
+  const [adminUserDbId, setAdminUserDbId] = useState<string | null>(null);
+  const [adminUserName, setAdminUserName] = useState<string | null>(null);
   const [employees, setEmployees] = useState<EmployeeMetrics[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [organization, setOrganization] = useState<Organization | null>(null);
@@ -85,6 +108,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [selectedDepartment, setSelectedDepartment] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [leaveFilter, setLeaveFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [viewingReasonId, setViewingReasonId] = useState<string | null>(null);
 
   useEffect(() => {
     initializeAdminDashboard();
@@ -130,6 +154,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       console.log('Setting admin organization ID:', adminData.organization_id);
       setAdminOrganizationId(adminData.organization_id);
 
+      // Get user's database ID for document uploads
+      const { data: userData } = await supabase
+        .from('users')
+        .select('id, name')
+        .eq('auth_id', currentUser.user.id)
+        .single();
+      
+      if (userData) {
+        setAdminUserDbId(userData.id);
+        setAdminUserName(userData.name);
+      }
+
       // Get organization information
       const { data: organizationData, error: organizationError } = await supabase
         .from('organizations')
@@ -152,7 +188,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const fetchDashboardData = async () => {
     if (!adminOrganizationId) return;
-    
+
     setLoading(true);
     try {
       await Promise.all([
@@ -210,7 +246,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           const totalTasks = taskData?.length || 0;
           const completedTasks = taskData?.filter(t => t.status === 'completed').length || 0;
-          const overdueTasks = taskData?.filter(t => 
+          const overdueTasks = taskData?.filter(t =>
             t.due_date < new Date().toISOString() && t.status !== 'completed'
           ).length || 0;
 
@@ -235,26 +271,26 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             ? conversationData.reduce((sum, c) => sum + (c.duration || 0), 0) / conversationData.length
             : 0;
 
-          const conversationsWithAnalysis = conversationData?.filter(c => 
+          const conversationsWithAnalysis = conversationData?.filter(c =>
             c.conversation_analysis && c.conversation_analysis.length > 0
           ) || [];
 
           const avgSentiment = conversationsWithAnalysis.length > 0
-            ? conversationsWithAnalysis.reduce((sum, c) => 
-                sum + (c.conversation_analysis[0]?.sentiment_score || 0), 0
-              ) / conversationsWithAnalysis.length
+            ? conversationsWithAnalysis.reduce((sum, c) =>
+              sum + (c.conversation_analysis[0]?.sentiment_score || 0), 0
+            ) / conversationsWithAnalysis.length
             : 0;
 
           const avgCommunication = conversationsWithAnalysis.length > 0
-            ? conversationsWithAnalysis.reduce((sum, c) => 
-                sum + (c.conversation_analysis[0]?.communication_effectiveness || 0), 0
-              ) / conversationsWithAnalysis.length
+            ? conversationsWithAnalysis.reduce((sum, c) =>
+              sum + (c.conversation_analysis[0]?.communication_effectiveness || 0), 0
+            ) / conversationsWithAnalysis.length
             : 0;
 
           const avgCompliance = conversationsWithAnalysis.length > 0
-            ? conversationsWithAnalysis.reduce((sum, c) => 
-                sum + (c.conversation_analysis[0]?.compliance_score || 0), 0
-              ) / conversationsWithAnalysis.length
+            ? conversationsWithAnalysis.reduce((sum, c) =>
+              sum + (c.conversation_analysis[0]?.compliance_score || 0), 0
+            ) / conversationsWithAnalysis.length
             : 0;
 
           // Leave metrics - only for this organization's employees
@@ -279,7 +315,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             .ilike('title', '%Leave Request%') // Filter by title to identify leave requests
             .gte('created_at', startDate.toISOString());
 
-          const postFactoRequests = postFactoData?.filter(t => 
+          const postFactoRequests = postFactoData?.filter(t =>
             new Date(t.created_at) > new Date(t.due_date)
           ).length || 0;
 
@@ -361,19 +397,19 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const formattedLeaves: LeaveRequest[] = filteredLeaveData.map(leave => {
         const isPostFacto = new Date(leave.created_at) > new Date(leave.due_date);
         const user = Array.isArray(leave.users) ? leave.users[0] : leave.users;
-        
+
         return {
           id: leave.id,
           employee_id: leave.assigned_to,
           employee_name: user?.name || 'Unknown',
           department: user?.department || 'Unknown',
           organization_name: organization?.name || 'Unknown',
-          leave_type: leave.title?.includes('HALF DAY') ? 'half_day' : 
-                      leave.title?.includes('EARLY DEPARTURE') ? 'early_departure' : 'full_day',
+          leave_type: leave.title?.includes('HALF DAY') ? 'half_day' :
+            leave.title?.includes('EARLY DEPARTURE') ? 'early_departure' : 'full_day',
           start_date: leave.due_date,
           reason: leave.description || '',
-          status: leave.status === 'completed' ? 'approved' : 
-                  leave.status === 'cancelled' ? 'rejected' : 'pending',
+          status: leave.status === 'completed' ? 'approved' :
+            leave.status === 'cancelled' ? 'rejected' : 'pending',
           is_post_facto: isPostFacto,
           requested_at: leave.created_at,
           approved_at: leave.completed_at,
@@ -392,7 +428,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const status = action === 'approve' ? 'completed' : 'cancelled';
       const { error } = await supabase
         .from('tasks')
-        .update({ 
+        .update({
           status,
           completed_at: action === 'approve' ? new Date().toISOString() : null,
           title: comments || (action === 'approve' ? 'Approved' : 'Rejected')
@@ -400,11 +436,130 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         .eq('id', leaveId);
 
       if (error) throw error;
-      
+
       // Refresh leave requests
       await fetchLeaveRequests();
     } catch (error) {
       console.error('Error updating leave request:', error);
+    }
+  };
+
+  const handleOpenWhatsAppLinkForLeave = async (leave: LeaveRequest) => {
+    try {
+      // Get employee phone number
+      const { data: employeeData, error: employeeError } = await supabase
+        .from('users')
+        .select('whatsapp_number, name')
+        .eq('id', leave.employee_id)
+        .single();
+
+      if (employeeError || !employeeData) {
+        alert('Could not find employee information');
+        return;
+      }
+
+      if (!employeeData.whatsapp_number) {
+        alert('Employee does not have a WhatsApp number on file');
+        return;
+      }
+
+      // Get approver name (current user)
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: approverData } = await supabase
+        .from('users')
+        .select('name')
+        .eq('auth_id', user?.id)
+        .single();
+
+      const approverName = approverData?.name || 'Admin';
+
+      // Calculate leave duration
+      const startDate = new Date(leave.start_date).toLocaleDateString();
+      const endDate = leave.end_date ? new Date(leave.end_date).toLocaleDateString() : null;
+      const duration = endDate ? `${startDate} to ${endDate}` : startDate;
+
+      // Create approval message
+      const message = `✅ Leave Request ${leave.status === 'approved' ? 'Approved' : 'Update'}
+
+Dear ${employeeData.name},
+
+Your leave request has been ${leave.status === 'approved' ? 'approved' : 'reviewed'} by ${approverName}.
+
+Details:
+📅 Period: ${duration}
+📝 Type: ${leave.leave_type.replace('_', ' ').toUpperCase()}
+💬 Reason: ${leave.reason}
+✅ Status: ${leave.status.toUpperCase()}
+
+Thank you for keeping us informed.`;
+
+      // Generate and open WhatsApp link
+      const whatsappUrl = generateWhatsAppLink(employeeData.whatsapp_number, message);
+      window.open(whatsappUrl, '_blank');
+    } catch (error) {
+      console.error('Error opening WhatsApp:', error);
+      alert('Failed to open WhatsApp');
+    }
+  };
+
+  const [sendingWhatsAppForLeave, setSendingWhatsAppForLeave] = useState<string | null>(null);
+
+  const handleSendWhatsAppToEmployeeForLeave = async (leave: LeaveRequest) => {
+    try {
+      setSendingWhatsAppForLeave(leave.id);
+
+      // Get employee phone number
+      const { data: employeeData, error: employeeError } = await supabase
+        .from('users')
+        .select('whatsapp_number, name')
+        .eq('id', leave.employee_id)
+        .single();
+
+      if (employeeError || !employeeData) {
+        alert('Could not find employee information');
+        return;
+      }
+
+      if (!employeeData.whatsapp_number) {
+        alert('Employee does not have a WhatsApp number on file');
+        return;
+      }
+
+      // Get approver name (current user)
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: approverData } = await supabase
+        .from('users')
+        .select('name')
+        .eq('auth_id', user?.id)
+        .single();
+
+      const approverName = approverData?.name || 'Admin';
+
+      // Calculate leave duration
+      const startDate = new Date(leave.start_date).toLocaleDateString();
+      const endDate = leave.end_date ? new Date(leave.end_date).toLocaleDateString() : null;
+      const duration = endDate ? `${startDate} to ${endDate}` : startDate;
+
+      // Create approval message
+      const message = `✅ Leave Request Approved\n\nDear ${employeeData.name},\n\nYour leave request has been approved by ${approverName}.\n\nDetails:\n📅 Period: ${duration}\n📝 Type: ${leave.leave_type.replace('_', ' ').toUpperCase()}\n💬 Reason: ${leave.reason}\n\nStatus: APPROVED\n\nThank you for keeping us informed.`;
+
+      // Send WhatsApp via backend
+      const result = await sendWhatsAppMessage({
+        phoneNumber: employeeData.whatsapp_number,
+        message,
+        taskId: leave.id
+      });
+
+      if (result.success) {
+        alert('WhatsApp notification sent to employee successfully!');
+      } else {
+        alert(`Failed to send WhatsApp: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Error sending WhatsApp:', error);
+      alert('Failed to send WhatsApp notification');
+    } finally {
+      setSendingWhatsAppForLeave(null);
     }
   };
 
@@ -458,7 +613,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const filteredLeaves = leaveRequests.filter(leave => {
     if (leaveFilter !== 'all' && leave.status !== leaveFilter) return false;
     return leave.employee_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-           leave.department.toLowerCase().includes(searchTerm.toLowerCase());
+      leave.department.toLowerCase().includes(searchTerm.toLowerCase());
   });
 
   if (loading) {
@@ -499,16 +654,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             { id: 'employees', label: 'Employee Assignment', icon: HiUsers },
             { id: 'conversations', label: 'Conversations', icon: HiMicrophone },
             { id: 'leaves', label: 'Leave Management', icon: HiCalendar },
+            { id: 'documents', label: 'Documents', icon: HiFolder },
             { id: 'whatsapp', label: 'WhatsApp Alerts', icon: HiExclamationCircle }
           ].map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${
-                activeTab === tab.id
+              className={`flex items-center px-3 py-2 text-sm font-medium rounded-md ${activeTab === tab.id
                   ? 'bg-blue-100 text-blue-700'
                   : 'text-gray-500 hover:text-gray-700'
-              }`}
+                }`}
             >
               <tab.icon className="w-4 h-4 mr-2" />
               {tab.label}
@@ -644,35 +799,70 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         )}
                       </td>
                       <td className="px-6 py-4">
-                        <div className="text-sm text-gray-900 max-w-xs truncate">
-                          {leave.reason}
+                        <div className="flex items-center gap-2">
+                          <div className="text-sm text-gray-900 max-w-xs truncate">
+                            {leave.reason}
+                          </div>
+                          {leave.reason && leave.reason.length > 50 && (
+                            <button
+                              onClick={() => setViewingReasonId(leave.id)}
+                              className="text-blue-600 hover:text-blue-900 flex-shrink-0"
+                              title="View full reason"
+                            >
+                              <HiEye className="w-5 h-5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                          leave.status === 'approved' ? 'bg-green-100 text-green-800' :
-                          leave.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                          'bg-yellow-100 text-yellow-800'
-                        }`}>
+                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${leave.status === 'approved' ? 'bg-green-100 text-green-800' :
+                            leave.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                              'bg-yellow-100 text-yellow-800'
+                          }`}>
                           {leave.status.charAt(0).toUpperCase() + leave.status.slice(1)}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        {leave.status === 'pending' && (
+                        {leave.status === 'pending' ? (
                           <div className="flex space-x-2">
                             <button
                               onClick={() => handleLeaveApproval(leave.id, 'approve')}
                               className="text-green-600 hover:text-green-900"
+                              title="Approve"
                             >
                               <HiCheckCircle className="w-5 h-5" />
                             </button>
                             <button
                               onClick={() => handleLeaveApproval(leave.id, 'reject')}
                               className="text-red-600 hover:text-red-900"
+                              title="Reject"
                             >
                               <HiXCircle className="w-5 h-5" />
                             </button>
                           </div>
+                        ) : leave.status === 'approved' ? (
+                          <div className="flex space-x-2">
+                            {/* Direct WhatsApp Link - Opens WhatsApp app/web */}
+                            <button
+                              onClick={() => handleOpenWhatsAppLinkForLeave(leave)}
+                              className="text-green-600 hover:text-green-900"
+                              title="Open WhatsApp (Direct Link)"
+                            >
+                              <HiPhone className="w-5 h-5" />
+                            </button>
+                            {/* Backend WhatsApp Send - Uses API */}
+                            <button
+                              onClick={() => handleSendWhatsAppToEmployeeForLeave(leave)}
+                              disabled={sendingWhatsAppForLeave === leave.id}
+                              className="text-blue-600 hover:text-blue-900 disabled:opacity-50"
+                              title="Send WhatsApp via API"
+                            >
+                              <HiChatAlt2 className="w-5 h-5" />
+                              {sendingWhatsAppForLeave === leave.id && <span className="ml-1 text-xs">...</span>}
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400">-</span>
                         )}
                       </td>
                     </tr>
@@ -688,7 +878,35 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <WhatsAppAdminPanel />
       )}
 
+      {activeTab === 'documents' && adminOrganizationId && adminUserDbId && (
+        <DocumentManagement
+          organizationId={adminOrganizationId}
+          userId={adminUserDbId}
+          userName={adminUserName || undefined}
+        />
+      )}
+
       {/* Add other tab content for conversations as needed */}
+
+      {/* Full Reason Modal */}
+      {viewingReasonId && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-medium text-gray-900">Full Reason</h3>
+              <button
+                onClick={() => setViewingReasonId(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <HiX className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="text-sm text-gray-700 whitespace-pre-wrap">
+              {leaveRequests.find(r => r.id === viewingReasonId)?.reason}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
