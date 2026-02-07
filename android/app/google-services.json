@@ -1,0 +1,99 @@
+{
+  "project_info": {
+    "project_number": "967577828067",
+    "project_id": "task-manager-d391c",
+    "storage_bucket": "task-manager-d391c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:967577828067:android:6d9dd90711dd633e76e3d6",
+        "android_client_info": {
+          "package_name": "com.dcptaskmanagmentapp.taskmanager"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "967577828067-29vem0ans65uu6r78hrettkmttbf7cr4.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.dcptaskmanagmentapp.taskmanager",
+            "certificate_hash": "bed482a5bdd8d09f5e538fb625b97948a8bc7443"
+          }
+        },
+        {
+          "client_id": "967577828067-isofeg2stoqanh24bm5hg1l55fv06jdv.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.dcptaskmanagmentapp.taskmanager",
+            "certificate_hash": "7c2d28c0fe4186a9303cb6678aa48a4d8982d884"
+          }
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAQ-pBeuuI3ARUSPUxP-cNjuoqOzcyoxxo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "967577828067-gicig4rncpv1kr78a57rt0m17rlp5rs9.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:967577828067:android:34a605e57140219f76e3d6",
+        "android_client_info": {
+          "package_name": "com.lims.builder"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAQ-pBeuuI3ARUSPUxP-cNjuoqOzcyoxxo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "967577828067-gicig4rncpv1kr78a57rt0m17rlp5rs9.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:967577828067:android:0ec029c7d77319d576e3d6",
+        "android_client_info": {
+          "package_name": "com.yourname.pathologylab"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAQ-pBeuuI3ARUSPUxP-cNjuoqOzcyoxxo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "967577828067-gicig4rncpv1kr78a57rt0m17rlp5rs9.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

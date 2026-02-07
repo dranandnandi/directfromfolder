@@ -24,7 +24,9 @@ interface WhatsAppResponse {
   error?: string;
 }
 
-const WHATSAPP_API_URL = Deno.env.get('WHATSAPP_API_URL') || 'http://134.209.145.186:3001/api/send-message';
+// New WhatsApp backend URL (DigitalOcean App Platform)
+const WHATSAPP_API_URL = Deno.env.get('WHATSAPP_API_URL') || 'https://lionfish-app-2-7r4qe.ondigitalocean.app/api/send-notification';
+const WHATSAPP_API_KEY = Deno.env.get('WHATSAPP_API_KEY') || 'whatsapp-notification-secret-key';
 
 serve(async (req) => {
   // Handle CORS preflight requests
@@ -79,6 +81,7 @@ serve(async (req) => {
 
     // Default to environment API URL
     let EFFECTIVE_API_URL = WHATSAPP_API_URL;
+    let organizationId: string | null = null;
 
     // Check organization WhatsApp settings if notification ID is provided
     if (notificationId) {
@@ -87,16 +90,18 @@ serve(async (req) => {
         .select(`
           *,
           users!inner(organization_id),
-          organizations!inner(whatsapp_enabled, auto_alerts_enabled, whatsapp_api_endpoint)
+          organizations!inner(id, whatsapp_enabled, auto_alerts_enabled, whatsapp_api_endpoint)
         `)
         .eq('id', notificationId)
         .single();
 
       if (notificationData) {
         const org = notificationData.organizations;
+        organizationId = org.id || notificationData.users.organization_id;
         
-        // Check if WhatsApp is enabled for this organization
+        // CHECK 1: Organization must have whatsapp_enabled = true
         if (!org.whatsapp_enabled) {
+          console.log(`WhatsApp disabled for org ${organizationId} (whatsapp_enabled=false)`);
           return new Response(
             JSON.stringify({ 
               success: false, 
@@ -115,13 +120,33 @@ serve(async (req) => {
       }
     }
 
+    // organizationId is required for the new API (CHECK 2: HR admin must be registered)
+    if (!organizationId) {
+      console.error('No organizationId found - cannot send WhatsApp notification');
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: 'organizationId is required. Provide notificationId to auto-detect org.' 
+        }),
+        { 
+          status: 400, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
+    }
+
     // Format phone number (ensure it starts with country code)
     const formattedPhone = formatPhoneNumber(phoneNumber);
 
-    // Prepare WhatsApp API request
+    // Prepare WhatsApp API request (new format for /api/send-notification)
     const whatsappPayload = {
       phoneNumber: formattedPhone,
       message: message,
+      organizationId: organizationId,  // Required for HR admin check
+      notificationId: notificationId,
+      title: patientName ? `${patientName} - ${testName || 'Notification'}` : undefined,
+      type: 'notification',
+      // Legacy fields for compatibility
       patientName: patientName || '',
       testName: testName || '',
       doctorName: doctorName || ''
@@ -130,16 +155,18 @@ serve(async (req) => {
     console.log('Sending WhatsApp message:', {
       phoneNumber: formattedPhone,
       messageLength: message.length,
+      organizationId,
       taskId,
       notificationId,
       apiUrl: EFFECTIVE_API_URL
     });
 
-    // Send message to WhatsApp API
+    // Send message to WhatsApp API with API key authentication
     const whatsappResponse = await fetch(EFFECTIVE_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-Api-Key': WHATSAPP_API_KEY,  // API key for authentication
       },
       body: JSON.stringify(whatsappPayload),
     });

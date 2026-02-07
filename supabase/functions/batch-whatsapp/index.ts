@@ -19,7 +19,9 @@ interface BatchWhatsAppResponse {
   errors: string[];
 }
 
-const WHATSAPP_API_URL = Deno.env.get('WHATSAPP_API_URL') || 'http://134.209.145.186:3001/api/send-message';
+// New WhatsApp backend URL (DigitalOcean App Platform)
+const WHATSAPP_API_URL = Deno.env.get('WHATSAPP_API_URL') || 'https://lionfish-app-2-7r4qe.ondigitalocean.app/api/send-notification';
+const WHATSAPP_API_KEY = Deno.env.get('WHATSAPP_API_KEY') || 'whatsapp-notification-secret-key';
 
 serve(async (req) => {
   // Handle CORS preflight requests
@@ -48,7 +50,7 @@ serve(async (req) => {
 
     console.log('Processing batch WhatsApp notifications:', { limit, notificationTypes });
 
-    // Query pending WhatsApp notifications
+    // Query pending WhatsApp notifications with organization info
     let query = supabase
       .from('notifications')
       .select(`
@@ -61,7 +63,9 @@ serve(async (req) => {
         whatsapp_number,
         ai_generated_message,
         scheduled_for,
-        created_at
+        created_at,
+        users!inner(organization_id),
+        organizations:users!inner(organizations!inner(id, whatsapp_enabled))
       `)
       .eq('whatsapp_sent', false)
       .not('whatsapp_number', 'is', null)
@@ -117,18 +121,39 @@ serve(async (req) => {
       response.processed++;
 
       try {
+        // Get organization ID and check whatsapp_enabled (CHECK 1)
+        const organizationId = notification.users?.organization_id;
+        const whatsappEnabled = notification.organizations?.whatsapp_enabled;
+
+        if (!organizationId) {
+          console.log(`Notification ${notification.id} has no organization, skipping`);
+          response.failed++;
+          response.errors.push(`Notification ${notification.id}: No organization_id`);
+          continue;
+        }
+
+        if (!whatsappEnabled) {
+          console.log(`Org ${organizationId} has whatsapp_enabled=false, skipping notification ${notification.id}`);
+          response.failed++;
+          response.errors.push(`Notification ${notification.id}: WhatsApp disabled for org`);
+          continue;
+        }
+
         const formattedPhone = formatPhoneNumber(notification.whatsapp_number);
         
+        // New payload format with organizationId for HR admin check (CHECK 2)
         const whatsappPayload = {
           phoneNumber: formattedPhone,
           message: notification.ai_generated_message,
-          patientName: '',
-          testName: notification.title,
-          doctorName: ''
+          organizationId: organizationId,
+          notificationId: notification.id,
+          title: notification.title,
+          type: 'batch-notification'
         };
 
         console.log(`Sending WhatsApp for notification ${notification.id}:`, {
           phoneNumber: formattedPhone,
+          organizationId,
           type: notification.type
         });
 
@@ -136,6 +161,7 @@ serve(async (req) => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'X-Api-Key': WHATSAPP_API_KEY,
           },
           body: JSON.stringify(whatsappPayload),
         });

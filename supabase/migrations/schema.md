@@ -20,7 +20,7 @@ CREATE TABLE public.attendance (
   punch_out_selfie_url text,
   punch_out_device_info jsonb,
   total_hours numeric,
-  break_hours numeric DEFAULT 1.0,
+  break_hours numeric DEFAULT 1.0 CHECK (break_hours >= 0::numeric),
   effective_hours numeric,
   is_late boolean DEFAULT false,
   is_early_out boolean DEFAULT false,
@@ -33,11 +33,67 @@ CREATE TABLE public.attendance (
   regularized_at timestamp with time zone,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
+  punch_in_distance_meters numeric,
+  punch_out_distance_meters numeric,
+  is_outside_geofence boolean DEFAULT false,
+  geofence_override_by uuid,
+  geofence_override_reason text,
+  geofence_override_at timestamp with time zone,
   CONSTRAINT attendance_pkey PRIMARY KEY (id),
   CONSTRAINT attendance_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
   CONSTRAINT attendance_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id),
   CONSTRAINT attendance_shift_id_fkey FOREIGN KEY (shift_id) REFERENCES public.shifts(id),
-  CONSTRAINT attendance_regularized_by_fkey FOREIGN KEY (regularized_by) REFERENCES public.users(id)
+  CONSTRAINT attendance_regularized_by_fkey FOREIGN KEY (regularized_by) REFERENCES public.users(id),
+  CONSTRAINT attendance_geofence_override_by_fkey FOREIGN KEY (geofence_override_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.attendance_import_batches (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  month integer NOT NULL CHECK (month >= 1 AND month <= 12),
+  year integer NOT NULL,
+  source text NOT NULL CHECK (source = ANY (ARRAY['excel'::text, 'csv'::text, 'biometric'::text])),
+  file_url text,
+  detected_format jsonb,
+  column_mapping jsonb,
+  status text NOT NULL DEFAULT 'uploaded'::text CHECK (status = ANY (ARRAY['uploaded'::text, 'mapped'::text, 'validated'::text, 'applied'::text, 'rejected'::text])),
+  created_by uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT attendance_import_batches_pkey PRIMARY KEY (id),
+  CONSTRAINT attendance_import_batches_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id),
+  CONSTRAINT attendance_import_batches_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.attendance_import_rows (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  batch_id uuid NOT NULL,
+  raw jsonb NOT NULL,
+  normalized jsonb,
+  match_confidence numeric,
+  user_id uuid,
+  validation_errors jsonb,
+  is_duplicate boolean DEFAULT false,
+  will_apply boolean DEFAULT true,
+  decision text,
+  notes text,
+  CONSTRAINT attendance_import_rows_pkey PRIMARY KEY (id),
+  CONSTRAINT attendance_import_rows_batch_id_fkey FOREIGN KEY (batch_id) REFERENCES public.attendance_import_batches(id),
+  CONSTRAINT attendance_import_rows_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.attendance_monthly_overrides (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  month integer NOT NULL CHECK (month >= 1 AND month <= 12),
+  year integer NOT NULL,
+  source_batch_id uuid,
+  payload jsonb NOT NULL,
+  approved_by uuid,
+  approved_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT attendance_monthly_overrides_pkey PRIMARY KEY (id),
+  CONSTRAINT attendance_monthly_overrides_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id),
+  CONSTRAINT attendance_monthly_overrides_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT attendance_monthly_overrides_source_batch_id_fkey FOREIGN KEY (source_batch_id) REFERENCES public.attendance_import_batches(id),
+  CONSTRAINT attendance_monthly_overrides_approved_by_fkey FOREIGN KEY (approved_by) REFERENCES public.users(id)
 );
 CREATE TABLE public.attendance_regularizations (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -53,6 +109,17 @@ CREATE TABLE public.attendance_regularizations (
   CONSTRAINT attendance_regularizations_attendance_id_fkey FOREIGN KEY (attendance_id) REFERENCES public.attendance(id),
   CONSTRAINT attendance_regularizations_requested_by_fkey FOREIGN KEY (requested_by) REFERENCES public.users(id),
   CONSTRAINT attendance_regularizations_approved_by_fkey FOREIGN KEY (approved_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.compliance_rules (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  country text NOT NULL DEFAULT 'IN'::text,
+  state text NOT NULL,
+  rule_type text NOT NULL CHECK (rule_type = ANY (ARRAY['PF'::text, 'ESIC'::text, 'PT'::text, 'TDS'::text, 'BONUS'::text, 'GRATUITY'::text, 'MIN_WAGE'::text])),
+  effective_from date NOT NULL,
+  effective_to date,
+  rule_payload jsonb NOT NULL,
+  active boolean DEFAULT true,
+  CONSTRAINT compliance_rules_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.conversation_analysis (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -95,12 +162,31 @@ CREATE TABLE public.conversation_logs (
 CREATE TABLE public.device_tokens (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid,
-  token text NOT NULL UNIQUE,
-  device_type text NOT NULL CHECK (device_type = ANY (ARRAY['android'::text, 'ios'::text, 'web'::text])),
+  fcm_token text NOT NULL UNIQUE,
+  platform text NOT NULL CHECK (platform = ANY (ARRAY['android'::text, 'ios'::text, 'web'::text])),
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
+  device_info jsonb DEFAULT '{}'::jsonb,
+  is_active boolean DEFAULT true,
+  last_used_at timestamp with time zone DEFAULT now(),
   CONSTRAINT device_tokens_pkey PRIMARY KEY (id),
   CONSTRAINT device_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.employee_compensation (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  effective_from date NOT NULL,
+  effective_to date,
+  ctc_annual numeric NOT NULL CHECK (ctc_annual > 0::numeric),
+  pay_schedule text NOT NULL DEFAULT 'monthly'::text,
+  currency text NOT NULL DEFAULT 'INR'::text,
+  compensation_payload jsonb NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  employee_name text,
+  organization_id uuid,
+  CONSTRAINT employee_compensation_pkey PRIMARY KEY (id),
+  CONSTRAINT employee_compensation_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT employee_compensation_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id)
 );
 CREATE TABLE public.employee_hr_data (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -114,6 +200,16 @@ CREATE TABLE public.employee_hr_data (
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT employee_hr_data_pkey PRIMARY KEY (id),
   CONSTRAINT employee_hr_data_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.employee_pay_overrides (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  period_month integer NOT NULL CHECK (period_month >= 1 AND period_month <= 12),
+  period_year integer NOT NULL,
+  override_payload jsonb NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT employee_pay_overrides_pkey PRIMARY KEY (id),
+  CONSTRAINT employee_pay_overrides_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
 );
 CREATE TABLE public.employee_shifts (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -160,6 +256,20 @@ CREATE TABLE public.notifications (
   CONSTRAINT notifications_pkey PRIMARY KEY (id),
   CONSTRAINT notifications_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.tasks(id),
   CONSTRAINT notifications_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.org_statutory_profiles (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL UNIQUE,
+  pf_number text,
+  esic_number text,
+  pt_state text,
+  tan text,
+  pan text,
+  bank_details jsonb,
+  challan_prefs jsonb,
+  pt_reg_no text,
+  CONSTRAINT org_statutory_profiles_pkey PRIMARY KEY (id),
+  CONSTRAINT org_statutory_profiles_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id)
 );
 CREATE TABLE public.organization_invites (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -213,8 +323,60 @@ CREATE TABLE public.organizations (
   billing_email text,
   phone text,
   address text,
+  location_latitude numeric CHECK (location_latitude IS NULL OR location_latitude >= '-90'::integer::numeric AND location_latitude <= 90::numeric),
+  location_longitude numeric CHECK (location_longitude IS NULL OR location_longitude >= '-180'::integer::numeric AND location_longitude <= 180::numeric),
+  location_address text,
+  geofence_settings jsonb DEFAULT '{"enabled": true, "enforcement_mode": "strict", "allow_admin_override": true, "distance_threshold_meters": 500}'::jsonb,
   CONSTRAINT organizations_pkey PRIMARY KEY (id),
   CONSTRAINT organizations_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.pay_components (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  code text NOT NULL UNIQUE,
+  name text NOT NULL,
+  type text NOT NULL CHECK (type = ANY (ARRAY['earning'::text, 'deduction'::text, 'employer_cost'::text])),
+  calc_method text NOT NULL CHECK (calc_method = ANY (ARRAY['fixed'::text, 'percent_of_component'::text, 'percent_of_gross'::text, 'formula'::text])),
+  calc_value numeric DEFAULT 0,
+  taxable boolean DEFAULT true,
+  pf_wage_participates boolean DEFAULT false,
+  esic_wage_participates boolean DEFAULT false,
+  sort_order integer DEFAULT 100,
+  active boolean DEFAULT true,
+  CONSTRAINT pay_components_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.payroll_periods (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  month numeric NOT NULL CHECK (month >= 1::numeric AND month <= 12::numeric),
+  year numeric NOT NULL,
+  status text NOT NULL DEFAULT 'draft'::text CHECK (status = ANY (ARRAY['draft'::text, 'locked'::text, 'posted'::text, 'challan_generated'::text])),
+  lock_at timestamp with time zone,
+  created_by uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT payroll_periods_pkey PRIMARY KEY (id),
+  CONSTRAINT payroll_periods_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id),
+  CONSTRAINT payroll_periods_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.payroll_runs (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  payroll_period_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  snapshot jsonb NOT NULL,
+  gross_earnings numeric NOT NULL,
+  total_deductions numeric NOT NULL,
+  net_pay numeric NOT NULL,
+  employer_cost numeric NOT NULL,
+  pf_wages numeric,
+  esic_wages numeric,
+  pt_amount numeric,
+  tds_amount numeric,
+  attendance_summary jsonb,
+  created_at timestamp with time zone DEFAULT now(),
+  status text,
+  pf_employee text,
+  CONSTRAINT payroll_runs_pkey PRIMARY KEY (id),
+  CONSTRAINT payroll_runs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT payroll_runs_payroll_period_id_fkey FOREIGN KEY (payroll_period_id) REFERENCES public.payroll_periods(id)
 );
 CREATE TABLE public.performance_reports (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -308,6 +470,7 @@ CREATE TABLE public.shifts (
   is_active boolean DEFAULT true,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
+  is_overnight boolean DEFAULT false,
   CONSTRAINT shifts_pkey PRIMARY KEY (id),
   CONSTRAINT shifts_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id)
 );
@@ -318,6 +481,19 @@ CREATE TABLE public.signup_trigger_debug (
   detail text,
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT signup_trigger_debug_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.statutory_filings (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  payroll_period_id uuid NOT NULL,
+  filing_type text NOT NULL CHECK (filing_type = ANY (ARRAY['PF_ECR'::text, 'ESIC_RETURN'::text, 'PT'::text, 'TDS24Q'::text, 'CHALLAN_PF'::text, 'CHALLAN_ESIC'::text])),
+  status text NOT NULL DEFAULT 'draft'::text CHECK (status = ANY (ARRAY['draft'::text, 'generated'::text, 'filed'::text])),
+  file_url text,
+  payload jsonb,
+  generated_at timestamp with time zone,
+  generated_by uuid,
+  CONSTRAINT statutory_filings_pkey PRIMARY KEY (id),
+  CONSTRAINT statutory_filings_payroll_period_id_fkey FOREIGN KEY (payroll_period_id) REFERENCES public.payroll_periods(id),
+  CONSTRAINT statutory_filings_generated_by_fkey FOREIGN KEY (generated_by) REFERENCES public.users(id)
 );
 CREATE TABLE public.task_activity_logs (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -383,6 +559,7 @@ CREATE TABLE public.users (
   invited_by uuid,
   last_active_at timestamp with time zone,
   phone text,
+  full_name text,
   CONSTRAINT users_pkey PRIMARY KEY (id),
   CONSTRAINT users_auth_id_fkey FOREIGN KEY (auth_id) REFERENCES auth.users(id),
   CONSTRAINT users_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id)

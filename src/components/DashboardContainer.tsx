@@ -81,6 +81,17 @@ const DashboardContainer: React.FC<DashboardContainerProps> = ({
           teamMembers={teamMembers}
         />
       )}
+
+      {/* Mobile FAB for Add Task */}
+      <button
+        onClick={() => onAddTask(TaskType.RegularTask)}
+        className="lg:hidden fixed bottom-20 right-4 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 transition-colors z-40"
+        aria-label="Add Task"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+        </svg>
+      </button>
     </>
   );
 };

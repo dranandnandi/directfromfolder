@@ -4,6 +4,7 @@
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { SplashScreen } from '@capacitor/splash-screen';
+import { notificationService } from '../services/NotificationService';
 
 /**
  * Initialize mobile app services
@@ -24,9 +25,9 @@ export const initializeMobileApp = async () => {
     // Hide splash screen
     await hideSplashScreen();
     
-    // Initialize notification services (when packages are installed)
-    // await notificationService.initializePushNotifications();
-    // await notificationService.initializeLocalNotifications();
+    // Initialize notification services
+    await notificationService.initializePushNotifications();
+    await notificationService.initializeLocalNotifications();
     
     // Initialize background sync (when packages are installed)
     // backgroundSyncService is already initialized as singleton

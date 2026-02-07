@@ -7,9 +7,13 @@ import DashboardContainer from './components/DashboardContainer';
 import Header from './components/Header';
 import { lazy, Suspense } from 'react';
 import ConversationDashboard from './components/ConversationDashboard';
+import BottomNavigation from './components/BottomNavigation';
+import { useMobileApp } from './hooks/useMobileApp';
+import NotificationModal from './components/NotificationModal';
+
 
 const Settings = lazy(() => import('./components/Settings'));
-const TeamManagement = lazy(() => import('./components/TeamManagement'));
+const UserManagement = lazy(() => import('./components/UserManagement'));
 const Reports = lazy(() => import('./components/Reports'));
 const TaskModal = lazy(() => import('./components/TaskModal'));
 const DeleteTasks = lazy(() => import('./components/DeleteTasks'));
@@ -93,6 +97,9 @@ function App() {
   const [hasInitialDataLoaded, setHasInitialDataLoaded] = useState(false);
   const isFetchingRef = useRef(false);
 
+  // Initialize mobile app services (push notifications, etc.)
+  useMobileApp();
+
   // Role-based access control component
   const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles: string[] }> = ({ children, allowedRoles }) => {
     if (!userRole || !allowedRoles.includes(userRole)) {
@@ -127,7 +134,7 @@ function App() {
         console.log('Skipping refresh - fetch already in progress');
         return;
       }
-      
+
       isFetchingRef.current = true;
       setLoading(true);
       await Promise.all([
@@ -150,7 +157,7 @@ function App() {
       setSession(initialSession);
       setLoading(false);
     };
-    
+
     setupAuth();
 
     const {
@@ -169,22 +176,22 @@ function App() {
         console.log('No session, skipping profile setup');
         return;
       }
-      
+
       setLoading(true);
-      
+
       try {
         console.log('Setting up user profile...');
         const organizationId = await ensureUserProfile();
-        
+
         if (organizationId) {
           console.log('User profile setup complete with organization ID:', organizationId);
           setUserOrganizationId(organizationId);
-          setOrganizationSettings(prevSettings => ({ 
-            ...prevSettings, 
-            id: organizationId, 
-            organizationId: organizationId 
+          setOrganizationSettings(prevSettings => ({
+            ...prevSettings,
+            id: organizationId,
+            organizationId: organizationId
           }));
-          
+
           // Fetch initial data only once
           setIsProfileEnsured(true);
         }
@@ -193,10 +200,10 @@ function App() {
         setProfileError('Failed to set up user profile. Please try again or contact support.');
       } finally {
         setIsProfileEnsured(true);
-        setLoading(false); 
+        setLoading(false);
       }
     };
-    
+
     if (session && !isProfileEnsured) {
       setupUserProfile();
     }
@@ -209,11 +216,11 @@ function App() {
       if (!session || !userOrganizationId || !isProfileEnsured || hasInitialDataLoaded || isFetchingRef.current) {
         return;
       }
-      
+
       console.log('Loading initial application data...');
       isFetchingRef.current = true;
       setLoading(true);
-      
+
       try {
         await Promise.all([
           fetchTasks(),
@@ -221,7 +228,7 @@ function App() {
           fetchTeamMembers(),
           fetchOrganizationSettings()
         ]);
-        
+
         console.log('Initial data load complete');
         setHasInitialDataLoaded(true);
       } catch (error) {
@@ -231,7 +238,7 @@ function App() {
         isFetchingRef.current = false;
       }
     };
-    
+
     loadInitialData();
   }, [session, userOrganizationId, isProfileEnsured, hasInitialDataLoaded]);
 
@@ -293,7 +300,7 @@ function App() {
         console.warn('No organization ID available, skipping organization settings fetch');
         return;
       }
-      
+
       console.log('Fetching organization settings...');
       if (!userOrganizationId) return;
 
@@ -329,12 +336,12 @@ function App() {
         console.log('Using existing organization ID:', userOrganizationId);
         return userOrganizationId;
       }
-      
+
       return await retryOperation(async () => {
         if (!session?.user?.id) throw new Error('No authenticated user');
 
         console.log('Ensuring user profile for auth ID:', session.user.id);
-        
+
         // Check if user exists in users table
         const { data: existingUser, error: userError } = await supabase
           .from('users')
@@ -343,11 +350,11 @@ function App() {
           .single();
 
         console.log('User lookup result:', { existingUser, error: userError?.message });
-        
+
         // If user doesn't exist or has no organization_id, we need to fix it
         if (userError || !existingUser || !existingUser.organization_id) {
           console.log('User needs organization setup');
-          
+
           // First, try to find an existing organization
           const { data: organizations, error: orgError } = await supabase
             .from('organizations')
@@ -385,7 +392,7 @@ function App() {
             console.log('Updating existing user with organization ID');
             const { error: updateError } = await supabase
               .from('users')
-              .update({ 
+              .update({
                 organization_id: organizationId,
                 role: existingUser.role || 'user'
               })
@@ -728,7 +735,7 @@ function App() {
         console.log('Skipping task add/update - fetch already in progress');
         return;
       }
-      
+
       // Handle personal tasks separately
       const task = newTasks[0];
       if (task.type === TaskType.PersonalTask) {
@@ -943,25 +950,25 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-gray-100 safe-area-container">
       {/* Sidebar for larger screens */}
       <div className="hidden lg:block lg:w-64 lg:fixed lg:inset-y-0 lg:left-0 lg:z-30">
-        <Sidebar 
-          isOpen={true} 
-          onClose={() => {}} 
-          onNavigate={handleNavigation} 
+        <Sidebar
+          isOpen={true}
+          onClose={() => { }}
+          onNavigate={handleNavigation}
           userRole={userRole}
           organizationSettings={organizationSettings}
         />
       </div>
-      
+
       {/* Sidebar for smaller screens (mobile) */}
       {sidebarOpen && (
         <div className="lg:hidden fixed inset-0 z-40">
           <div className="fixed inset-0 bg-black bg-opacity-50" onClick={() => setSidebarOpen(false)} />
-          <Sidebar 
-            isOpen={sidebarOpen} 
-            onClose={() => setSidebarOpen(false)} 
+          <Sidebar
+            isOpen={sidebarOpen}
+            onClose={() => setSidebarOpen(false)}
             onNavigate={(view) => {
               handleNavigation(view);
               setSidebarOpen(false);
@@ -971,132 +978,138 @@ function App() {
           />
         </div>
       )}
-      
+
       {/* Main content area */}
-      <div className="lg:ml-64">
-        {/* Header */}
-        <Header onMenuClick={() => setSidebarOpen(true)} onRefresh={handleGlobalRefresh} organizationSettings={organizationSettings} />
-        
-        {/* Main content with Routes */}
-        <main className="p-4 lg:p-6">
-          <Routes>
-            <Route path="/" element={
-              <DashboardContainer 
-                currentUserId={session?.user?.id}
-                tasks={tasks} 
-                personalTasks={personalTasks}
-                onAddTask={handleAddTaskClick}
-                onEditTask={handleEditTask}
-                onTaskUpdate={handleRefreshTasks}
-                teamMembers={teamMembers}
-              />
-            } />
-            <Route path="/settings" element={
-              <Suspense fallback={<div className="p-4">Loading settings...</div>}>
-                <Settings />
-              </Suspense>
-            } />
-            <Route path="/team" element={
-              <Suspense fallback={<div className="p-4">Loading team management...</div>}>
-                <TeamManagement />
-              </Suspense>
-            } />
-            <Route path="/reports" element={
-              <Suspense fallback={<div className="p-4">Loading reports...</div>}>
-                <Reports />
-              </Suspense>
-            } />
-            <Route path="/deleteTasks" element={
-              <Suspense fallback={<div className="p-4">Loading delete tasks...</div>}>
-                <DeleteTasks teamMembers={teamMembers} onTasksRefreshed={handleGlobalRefresh} />
-              </Suspense>
-            } />
-            <Route path="/recurringTasks" element={
-              <Suspense fallback={<div className="p-4">Loading recurring tasks...</div>}>
-                <RecurringTasksManager teamMembers={teamMembers} organizationSettings={organizationSettings} />
-              </Suspense>
-            } />
-            <Route path="/performanceReports" element={
-              <Suspense fallback={<div className="p-4">Loading performance reports...</div>}>
-                <PerformanceReports />
-              </Suspense>
-            } />
-            <Route path="/conversations" element={
-              <Suspense fallback={<div className="p-4">Loading conversation dashboard...</div>}>
-                <ConversationDashboard />
-              </Suspense>
-            } />
-            <Route path="/adminDashboard" element={
-              <Suspense fallback={<div className="p-4">Loading admin dashboard...</div>}>
-                <AdminDashboard adminUserId={session?.user?.id || ''} />
-              </Suspense>
-            } />
-            <Route path="/leaveManagement" element={
-              <Suspense fallback={<div className="p-4">Loading leave management...</div>}>
-                <LeaveManagement userId={session?.user?.id} isAdmin={userRole === 'admin' || userRole === 'superadmin'} />
-              </Suspense>
-            } />
-            <Route path="/attendance" element={
-              <Suspense fallback={<div className="p-4">Loading attendance...</div>}>
-                <AttendanceDashboard />
-              </Suspense>
-            } />
-            <Route path="/punch" element={
-              <Suspense fallback={<div className="p-4">Loading punch in/out...</div>}>
-                <PunchInOut />
-              </Suspense>
-            } />
-            {/* Payroll System Routes */}
-            <Route path="/payroll-preview" element={
-              <Suspense fallback={<div className="p-4">Loading payroll preview...</div>}>
-                {userOrganizationId ? (
-                  <OrganizationProvider organizationId={userOrganizationId}>
-                    <PayrollPreview />
-                  </OrganizationProvider>
-                ) : (
-                  <div className="p-4">Loading organization...</div>
-                )}
-              </Suspense>
-            } />
-            <Route path="/payroll/*" element={
-              <ProtectedRoute allowedRoles={['admin', 'payroll_admin']}>
-                <Suspense fallback={<div className="p-4">Loading payroll...</div>}>
+      <div className="lg:ml-64 pb-16 lg:pb-0">
+        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
+          {/* Header */}
+          <Header onMenuClick={() => setSidebarOpen(true)} onRefresh={handleGlobalRefresh} organizationSettings={organizationSettings} />
+
+          {/* Main content with Routes */}
+          <main className="py-4 lg:py-6">
+            <Routes>
+              <Route path="/" element={
+                <DashboardContainer
+                  currentUserId={session?.user?.id}
+                  tasks={tasks}
+                  personalTasks={personalTasks}
+                  onAddTask={handleAddTaskClick}
+                  onEditTask={handleEditTask}
+                  onTaskUpdate={handleRefreshTasks}
+                  teamMembers={teamMembers}
+                />
+              } />
+              <Route path="/settings" element={
+                <Suspense fallback={<div className="p-4">Loading settings...</div>}>
+                  <Settings />
+                </Suspense>
+              } />
+              <Route path="/team" element={
+                <Suspense fallback={<div className="p-4">Loading team management...</div>}>
+                  <UserManagement />
+                </Suspense>
+              } />
+              <Route path="/reports" element={
+                <Suspense fallback={<div className="p-4">Loading reports...</div>}>
+                  <Reports />
+                </Suspense>
+              } />
+              <Route path="/deleteTasks" element={
+                <Suspense fallback={<div className="p-4">Loading delete tasks...</div>}>
+                  <DeleteTasks teamMembers={teamMembers} onTasksRefreshed={handleGlobalRefresh} />
+                </Suspense>
+              } />
+              <Route path="/recurringTasks" element={
+                <Suspense fallback={<div className="p-4">Loading recurring tasks...</div>}>
+                  <RecurringTasksManager teamMembers={teamMembers} organizationSettings={organizationSettings} />
+                </Suspense>
+              } />
+              <Route path="/performanceReports" element={
+                <Suspense fallback={<div className="p-4">Loading performance reports...</div>}>
+                  <PerformanceReports />
+                </Suspense>
+              } />
+              <Route path="/conversations" element={
+                <Suspense fallback={<div className="p-4">Loading conversation dashboard...</div>}>
+                  <ConversationDashboard />
+                </Suspense>
+              } />
+              <Route path="/adminDashboard" element={
+                <Suspense fallback={<div className="p-4">Loading admin dashboard...</div>}>
+                  <AdminDashboard adminUserId={session?.user?.id || ''} />
+                </Suspense>
+              } />
+              <Route path="/leaveManagement" element={
+                <Suspense fallback={<div className="p-4">Loading leave management...</div>}>
+                  <LeaveManagement userId={session?.user?.id} isAdmin={userRole === 'admin' || userRole === 'superadmin'} />
+                </Suspense>
+              } />
+              <Route path="/attendance" element={
+                <Suspense fallback={<div className="p-4">Loading attendance...</div>}>
+                  <AttendanceDashboard />
+                </Suspense>
+              } />
+              <Route path="/punch" element={
+                <Suspense fallback={<div className="p-4">Loading punch in/out...</div>}>
+                  <PunchInOut />
+                </Suspense>
+              } />
+              {/* Payroll System Routes */}
+              <Route path="/payroll-preview" element={
+                <Suspense fallback={<div className="p-4">Loading payroll preview...</div>}>
                   {userOrganizationId ? (
                     <OrganizationProvider organizationId={userOrganizationId}>
-                      <PayrollShell />
+                      <PayrollPreview />
                     </OrganizationProvider>
                   ) : (
                     <div className="p-4">Loading organization...</div>
                   )}
                 </Suspense>
-              </ProtectedRoute>
-            } />
-            <Route path="/my-payslip" element={
-              <ProtectedRoute allowedRoles={['admin', 'payroll_admin', 'user']}>
-                <Suspense fallback={<div className="p-4">Loading payslip...</div>}>
-                  <MyPayslip />
-                </Suspense>
-              </ProtectedRoute>
-            } />
-            {/* Catch-all route - redirect to dashboard */}
-            <Route path="*" element={
-              <DashboardContainer 
-                currentUserId={session?.user?.id}
-                tasks={tasks} 
-                personalTasks={personalTasks}
-                onAddTask={handleAddTaskClick}
-                onEditTask={handleEditTask}
-                onTaskUpdate={handleRefreshTasks}
-                teamMembers={teamMembers}
-              />
-            } />
-          </Routes>
-        </main>
+              } />
+              <Route path="/payroll/*" element={
+                <ProtectedRoute allowedRoles={['admin', 'payroll_admin']}>
+                  <Suspense fallback={<div className="p-4">Loading payroll...</div>}>
+                    {userOrganizationId ? (
+                      <OrganizationProvider organizationId={userOrganizationId}>
+                        <PayrollShell />
+                      </OrganizationProvider>
+                    ) : (
+                      <div className="p-4">Loading organization...</div>
+                    )}
+                  </Suspense>
+                </ProtectedRoute>
+              } />
+              <Route path="/my-payslip" element={
+                <ProtectedRoute allowedRoles={['admin', 'payroll_admin', 'user']}>
+                  <Suspense fallback={<div className="p-4">Loading payslip...</div>}>
+                    <MyPayslip />
+                  </Suspense>
+                </ProtectedRoute>
+              } />
+              {/* Catch-all route - redirect to dashboard */}
+              <Route path="*" element={
+                <DashboardContainer
+                  currentUserId={session?.user?.id}
+                  tasks={tasks}
+                  personalTasks={personalTasks}
+                  onAddTask={handleAddTaskClick}
+                  onEditTask={handleEditTask}
+                  onTaskUpdate={handleRefreshTasks}
+                  teamMembers={teamMembers}
+                />
+              } />
+            </Routes>
+          </main>
+
+        </div>
+
+        {/* Bottom Navigation for Mobile */}
+        <BottomNavigation onMenuClick={() => setSidebarOpen(true)} />
 
         {/* Task Modal */}
         <Suspense fallback={null}>
           {showTaskModal && (
-            <TaskModal 
+            <TaskModal
               isOpen={showTaskModal}
               onClose={() => {
                 setShowTaskModal(false);
@@ -1111,6 +1124,9 @@ function App() {
             />
           )}
         </Suspense>
+
+        {/* Notification Modal for push notifications with images */}
+        <NotificationModal />
       </div>
     </div>
   );

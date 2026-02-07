@@ -19,7 +19,9 @@ interface ProcessingResult {
   errors: string[];
 }
 
-const WHATSAPP_API_URL = Deno.env.get('WHATSAPP_API_URL') || 'http://134.209.145.186:3001/api/send-message';
+// New WhatsApp backend URL (DigitalOcean App Platform)
+const WHATSAPP_API_URL = Deno.env.get('WHATSAPP_API_URL') || 'https://lionfish-app-2-7r4qe.ondigitalocean.app/api/send-notification';
+const WHATSAPP_API_KEY = Deno.env.get('WHATSAPP_API_KEY') || 'whatsapp-notification-secret-key';
 
 serve(async (req) => {
   // Handle CORS preflight requests
@@ -161,22 +163,56 @@ serve(async (req) => {
 
 async function processWhatsAppNotification(notification: any, supabase: any): Promise<boolean> {
   try {
-    // Format phone number (remove any leading +91 and ensure 10 digits for API)
+    // Get organization ID from notification
+    const organizationId = notification.organization_id;
+    
+    if (!organizationId) {
+      console.log(`Notification ${notification.id} has no organization_id, skipping`);
+      await supabase.rpc('mark_whatsapp_notification_status', {
+        notification_id: notification.id,
+        success: false,
+        error_message: 'Missing organization_id'
+      });
+      return false;
+    }
+
+    // Check if org has whatsapp_enabled (CHECK 1)
+    const { data: org } = await supabase
+      .from('organizations')
+      .select('id, whatsapp_enabled')
+      .eq('id', organizationId)
+      .single();
+
+    if (!org?.whatsapp_enabled) {
+      console.log(`Org ${organizationId} has whatsapp_enabled=false, skipping notification ${notification.id}`);
+      await supabase.rpc('mark_whatsapp_notification_status', {
+        notification_id: notification.id,
+        success: false,
+        error_message: 'WhatsApp disabled for organization'
+      });
+      return false;
+    }
+
+    // Format phone number
     const formattedPhone = formatPhoneForAPI(notification.whatsapp_number);
 
-    // Prepare WhatsApp API request
+    // Prepare WhatsApp API request (new format)
     const whatsappPayload = {
       phoneNumber: formattedPhone,
-      message: notification.ai_generated_message
+      message: notification.ai_generated_message,
+      organizationId: organizationId,  // Required for HR admin check (CHECK 2)
+      notificationId: notification.id,
+      type: 'queue-notification'
     };
 
-    console.log(`Sending WhatsApp to ${formattedPhone} for notification ${notification.id}`);
+    console.log(`Sending WhatsApp to ${formattedPhone} for notification ${notification.id}, org ${organizationId}`);
 
-    // Send message to WhatsApp API
+    // Send message to WhatsApp API with API key
     const whatsappResponse = await fetch(WHATSAPP_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-Api-Key': WHATSAPP_API_KEY,
       },
       body: JSON.stringify(whatsappPayload),
     });

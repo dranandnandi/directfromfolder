@@ -14,11 +14,11 @@ import androidx.core.app.NotificationManagerCompat;
  * Integrates with backend WhatsApp/SMS system by providing local notification support
  */
 public class NotificationHelper {
-    
+
     private static final String CHANNEL_ID_GENERAL = "task_manager_general";
     private static final String CHANNEL_ID_URGENT = "task_manager_urgent";
     private static final String CHANNEL_ID_REMINDERS = "task_manager_reminders";
-    
+
     private Context context;
     private NotificationManagerCompat notificationManager;
 
@@ -40,17 +40,17 @@ public class NotificationHelper {
                 NotificationManager.IMPORTANCE_DEFAULT
             );
             generalChannel.setDescription("General task manager notifications");
-            
+
             // Urgent notifications channel
             NotificationChannel urgentChannel = new NotificationChannel(
                 CHANNEL_ID_URGENT,
-                "Urgent Notifications", 
+                "Urgent Notifications",
                 NotificationManager.IMPORTANCE_HIGH
             );
             urgentChannel.setDescription("Urgent task alerts and overdue notifications");
             urgentChannel.enableVibration(true);
             urgentChannel.setVibrationPattern(new long[]{100, 200, 300, 400, 500, 400, 300, 200, 400});
-            
+
             // Reminder notifications channel
             NotificationChannel reminderChannel = new NotificationChannel(
                 CHANNEL_ID_REMINDERS,
@@ -93,11 +93,11 @@ public class NotificationHelper {
     private void showNotification(String title, String message, int notificationId, String channelId, boolean isUrgent) {
         Intent intent = new Intent(context, MainActivity.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-        
+
         PendingIntent pendingIntent = PendingIntent.getActivity(
-            context, 
-            0, 
-            intent, 
+            context,
+            0,
+            intent,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 

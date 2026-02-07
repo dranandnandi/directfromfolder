@@ -1,5 +1,6 @@
 import { supabase } from '../utils/supabaseClient';
 import { Shift, EmployeeShift, Attendance, AttendanceRegularization, PunchData, AttendanceSummary } from '../models/attendance';
+import { calculateDistance, parseGeofenceSettings } from '../utils/geolocation';
 
 export class AttendanceService {
 
@@ -67,6 +68,74 @@ export class AttendanceService {
       .eq('id', id);
 
     if (error) throw error;
+  }
+
+  // ========== EMPLOYEE SHIFT ASSIGNMENT ==========
+
+  /**
+   * Validate geofence for punch in/out
+   * @returns Object with isValid flag, distance, and isOutsideGeofence flag
+   * @throws Error if geofence is enabled in strict mode and location is outside geofence
+   */
+  private static async validateGeofence(
+    organizationId: string,
+    latitude: number,
+    longitude: number
+  ): Promise<{ isValid: boolean; distance: number | null; isOutsideGeofence: boolean }> {
+    // Fetch organization geofence settings
+    const { data: orgData, error: orgError } = await supabase
+      .from('organizations')
+      .select('location_latitude, location_longitude, geofence_settings')
+      .eq('id', organizationId)
+      .single();
+
+    if (orgError) {
+      console.error('Error fetching organization geofence settings:', orgError);
+      return { isValid: true, distance: null, isOutsideGeofence: false };
+    }
+
+    // If no organization location configured, allow punch
+    if (!orgData.location_latitude || !orgData.location_longitude) {
+      console.log('No organization location configured, allowing punch');
+      return { isValid: true, distance: null, isOutsideGeofence: false };
+    }
+
+    // Parse geofence settings
+    const settings = parseGeofenceSettings(orgData.geofence_settings);
+
+    // If geofencing is disabled, allow punch
+    if (!settings.enabled) {
+      console.log('Geofencing is disabled, allowing punch');
+      return { isValid: true, distance: null, isOutsideGeofence: false };
+    }
+
+    // Calculate distance
+    const distance = calculateDistance(
+      latitude,
+      longitude,
+      orgData.location_latitude,
+      orgData.location_longitude
+    );
+
+    console.log(`Distance from organization: ${distance.toFixed(2)}m (threshold: ${settings.distance_threshold_meters}m)`);
+
+    const isOutsideGeofence = distance > settings.distance_threshold_meters;
+
+    // Strict mode: block punch if outside geofence
+    if (isOutsideGeofence && settings.enforcement_mode === 'strict') {
+      throw new Error(
+        `You are ${distance.toFixed(0)}m away from the organization location. ` +
+        `Punch is not allowed beyond ${settings.distance_threshold_meters}m. ` +
+        `Please move closer or contact your administrator.`
+      );
+    }
+
+    // Warning mode: allow but flag
+    return {
+      isValid: true,
+      distance: Math.round(distance * 100) / 100, // Round to 2 decimals
+      isOutsideGeofence,
+    };
   }
 
   // ========== EMPLOYEE SHIFT ASSIGNMENT ==========
@@ -193,6 +262,16 @@ export class AttendanceService {
 
     if (!userData) throw new Error('User not found');
 
+    // Validate geofence if coordinates are provided
+    let geofenceResult = { isValid: true, distance: null as number | null, isOutsideGeofence: false };
+    if (punchData.latitude && punchData.longitude) {
+      geofenceResult = await this.validateGeofence(
+        userData.organization_id,
+        punchData.latitude,
+        punchData.longitude
+      );
+    }
+
     const currentShift = await this.getEmployeeCurrentShift(userId);
 
     // Upload selfie
@@ -210,6 +289,8 @@ export class AttendanceService {
       punch_in_address: punchData.address,
       punch_in_selfie_url: selfieUrl,
       punch_in_device_info: punchData.device_info,
+      punch_in_distance_meters: geofenceResult.distance,
+      is_outside_geofence: geofenceResult.isOutsideGeofence,
     };
 
     const { data, error } = await supabase
@@ -233,6 +314,16 @@ export class AttendanceService {
       .single();
 
     if (!userData) throw new Error('User not found');
+
+    // Validate geofence if coordinates are provided
+    let geofenceResult = { isValid: true, distance: null as number | null, isOutsideGeofence: false };
+    if (punchData.latitude && punchData.longitude) {
+      geofenceResult = await this.validateGeofence(
+        userData.organization_id,
+        punchData.latitude,
+        punchData.longitude
+      );
+    }
 
     // Find active punch-in record (look back 2 days for overnight shifts)
     const twoDaysAgo = new Date();
@@ -272,16 +363,25 @@ export class AttendanceService {
     const selfieUrl = await this.uploadSelfie(punchData.selfie_file, userId, 'punch_out', userData.organization_id);
 
     // Update by ID (not date) to handle overnight shifts correctly
+    const updateData: any = {
+      punch_out_time: currentTime,
+      punch_out_latitude: punchData.latitude,
+      punch_out_longitude: punchData.longitude,
+      punch_out_address: punchData.address,
+      punch_out_selfie_url: selfieUrl,
+      punch_out_device_info: punchData.device_info,
+      punch_out_distance_meters: geofenceResult.distance,
+    };
+
+    // Update is_outside_geofence only if punch-out is also outside
+    // (Keep the flag true if punch-in was outside, even if punch-out is inside)
+    if (geofenceResult.isOutsideGeofence) {
+      updateData.is_outside_geofence = true;
+    }
+
     const { data, error } = await supabase
       .from('attendance')
-      .update({
-        punch_out_time: currentTime,
-        punch_out_latitude: punchData.latitude,
-        punch_out_longitude: punchData.longitude,
-        punch_out_address: punchData.address,
-        punch_out_selfie_url: selfieUrl,
-        punch_out_device_info: punchData.device_info,
-      })
+      .update(updateData)
       .eq('id', activeRecord.id)  // Update by ID, not by date
       .select()
       .single();

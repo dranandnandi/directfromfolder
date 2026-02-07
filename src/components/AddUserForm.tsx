@@ -17,6 +17,7 @@ const AddUserForm: React.FC<AddUserFormProps> = ({
   const [formData, setFormData] = useState({
     name: '',
     whatsappNumber: '',
+    countryCode: '+91',
     password: '',
     department: '',
     role: 'user'
@@ -24,11 +25,37 @@ const AddUserForm: React.FC<AddUserFormProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Country codes
+  const countryCodes = [
+    { code: '+91', country: 'India', flag: '🇮🇳', length: 10 },
+    { code: '+971', country: 'UAE', flag: '🇦🇪', length: 9 }
+  ];
+
   useEffect(() => {
     if (editingUser) {
+      console.log('=== EDITING USER ==>', editingUser.name, 'WhatsApp:', editingUser.whatsapp_number);
+      
+      // Extract country code and clean WhatsApp number
+      let detectedCountryCode = '+91';
+      let cleanWhatsApp = '';
+      
+      if (editingUser.whatsapp_number.startsWith('+971')) {
+        detectedCountryCode = '+971';
+        cleanWhatsApp = editingUser.whatsapp_number.replace(/^\+971/, '').replace(/\D/g, '');
+      } else if (editingUser.whatsapp_number.startsWith('+91')) {
+        detectedCountryCode = '+91';
+        cleanWhatsApp = editingUser.whatsapp_number.replace(/^\+91/, '').replace(/\D/g, '');
+      } else {
+        // Fallback: extract all digits
+        cleanWhatsApp = editingUser.whatsapp_number.replace(/\D/g, '');
+      }
+      
+      console.log('Parsed - Country:', detectedCountryCode, 'Number:', cleanWhatsApp);
+      
       setFormData({
         name: editingUser.name,
-        whatsappNumber: editingUser.whatsapp_number.replace(/^\+91/, ''),
+        whatsappNumber: cleanWhatsApp,
+        countryCode: detectedCountryCode,
         password: '',
         department: editingUser.department,
         role: editingUser.role
@@ -55,9 +82,17 @@ const AddUserForm: React.FC<AddUserFormProps> = ({
         throw new Error('Please enter a valid 10-digit WhatsApp number');
       }
 
+      // Validate WhatsApp number based on country code
+      const selectedCountry = countryCodes.find(c => c.code === formData.countryCode);
+      const expectedLength = selectedCountry?.length || 10;
+      
+      if (!new RegExp(`^\\d{${expectedLength}}$`).test(formData.whatsappNumber)) {
+        throw new Error(`Please enter a valid ${expectedLength}-digit WhatsApp number for ${selectedCountry?.country}`);
+      }
+
       const userData: Partial<User> = {
         name: formData.name,
-        whatsapp_number: `+91${formData.whatsappNumber}`,
+        whatsapp_number: formData.countryCode + formData.whatsappNumber,
         department: formData.department,
         role: formData.role
       };
@@ -101,20 +136,39 @@ const AddUserForm: React.FC<AddUserFormProps> = ({
           WhatsApp Number <span className="text-red-500">*</span>
         </label>
         <div className="flex">
-          <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-500 sm:text-sm">
-            +91
-          </span>
+          <select
+            value={formData.countryCode}
+            onChange={(e) => {
+              console.log('Country code changed to:', e.target.value);
+              setFormData({ ...formData, countryCode: e.target.value, whatsappNumber: '' });
+            }}
+            className="inline-flex items-center px-2 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-700 text-sm focus:border-blue-500 focus:ring-blue-500"
+          >
+            {countryCodes.map((country) => (
+              <option key={country.code} value={country.code}>
+                {country.flag} {country.code}
+              </option>
+            ))}
+          </select>
           <input
-            type="tel"
+            type="text"
+            inputMode="numeric"
             required
-            pattern="[0-9]{10}"
             className="w-full rounded-none rounded-r-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
             value={formData.whatsappNumber}
-            onChange={(e) => setFormData({ ...formData, whatsappNumber: e.target.value })}
-            placeholder="10-digit number"
-            disabled={!!editingUser}
+            onChange={(e) => {
+              const selectedCountry = countryCodes.find(c => c.code === formData.countryCode);
+              const maxLength = selectedCountry?.length || 10;
+              const cleaned = e.target.value.replace(/\D/g, '').slice(0, maxLength);
+              setFormData({ ...formData, whatsappNumber: cleaned });
+            }}
+            placeholder={`${countryCodes.find(c => c.code === formData.countryCode)?.length || 10}-digit number`}
+            maxLength={countryCodes.find(c => c.code === formData.countryCode)?.length || 10}
           />
         </div>
+        <p className="mt-1 text-xs text-gray-500">
+          Full number: {formData.countryCode}{formData.whatsappNumber}
+        </p>
       </div>
 
       {!editingUser && (

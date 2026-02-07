@@ -126,7 +126,7 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
   onEditTask,
   onTaskUpdate
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'messages' | 'activity' | 'quality' | 'conversations'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'messages' | 'activity' | 'quality'>('overview');
   const [messages, setMessages] = useState<TaskMessage[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [qualityEntries, setQualityEntries] = useState<QualityControlEntry[]>([]);
@@ -427,10 +427,10 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
 
   return (
     <>
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-end sm:items-center justify-center z-50">
-        <div className="bg-white rounded-t-lg sm:rounded-lg w-full sm:max-w-4xl max-h-[95vh] sm:max-h-[90vh] overflow-hidden">
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
+        <div className="bg-white rounded-lg w-full sm:max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
           {/* Header */}
-          <div className="p-4 sm:p-6 border-b flex justify-between items-start">
+          <div className="p-4 sm:p-6 border-b flex justify-between items-start flex-shrink-0">
             <div className="flex-1 pr-4">
               <h3 className="text-lg sm:text-xl font-semibold text-gray-900 leading-tight">{task.title}</h3>
             </div>
@@ -455,14 +455,14 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                 <HiMicrophone className="w-4 h-4" />
                 Record Conversation
               </button> */}
-              <button onClick={onClose}>
+              <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-full">
                 <HiX className="w-6 h-6" />
               </button>
             </div>
           </div>
 
           {/* Tabs */}
-          <div className="border-b">
+          <div className="border-b flex-shrink-0">
             <div className="flex overflow-x-auto">
               <button
                 className={clsx(
@@ -510,17 +510,6 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                   Quality
                 </button>
               )}
-              <button
-                className={clsx(
-                  'px-3 sm:px-4 py-2 text-sm font-medium border-b-2 flex-shrink-0',
-                  activeTab === 'conversations'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                )}
-                onClick={() => setActiveTab('conversations')}
-              >
-                Conversations
-              </button>
             </div>
           </div>
 
@@ -606,10 +595,6 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                           ) : (
                             <span className="text-gray-400 italic">Not set</span>
                           )}
-                        </div>
-                        {/* Debug info - remove in production */}
-                        <div className="text-xs text-gray-400 mt-1">
-                          Debug: {task.dueDate ? `${task.dueDate} (${typeof task.dueDate})` : 'undefined/null'}
                         </div>
                       </div>
                       {task.patientId && (
@@ -914,14 +899,6 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
             )}
           </div>
           
-          {/* Conversations Tab - Hidden temporarily */}
-          {/* {activeTab === 'conversations' && currentUserId && (
-            <div className="space-y-4">
-              <ConversationRecorder 
-                customerIdentifier={task.patientId}
-              />
-            </div>
-          )} */}
         </div>
 
         {/* Action Buttons Footer */}

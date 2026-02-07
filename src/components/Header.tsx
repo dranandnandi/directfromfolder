@@ -59,14 +59,17 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, onRefresh, organizationSet
 
   return (
     <header className="bg-white shadow-sm">
-      <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between relative">
-        <div className="flex items-center gap-4">
-          <button onClick={onMenuClick} className="lg:hidden">
+      {/* Safe area spacer for Android status bar/notch - more space on mobile */}
+      <div className="h-12 sm:h-10 lg:h-0 bg-white"></div>
+      <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between relative">
+        <div className="flex items-center gap-3">
+          <button onClick={onMenuClick} className="lg:hidden p-1">
             <HiMenu className="w-6 h-6" />
           </button>
           <div className="flex items-center gap-2">
-            <img src={dcpLogo} alt="DCP Logo" className="w-10 h-10" />
-            <h1 className="text-lg font-semibold">{organizationSettings?.name || 'Clinic Task Manager'}</h1>
+            <img src={dcpLogo} alt="DCP Logo" className="w-8 h-8 sm:w-10 sm:h-10" />
+            {/* Hide organization name on small phones, show on tablets and desktop */}
+            <h1 className="hidden sm:block text-lg font-semibold">{organizationSettings?.name || 'Clinic Task Manager'}</h1>
           </div>
         </div>
         

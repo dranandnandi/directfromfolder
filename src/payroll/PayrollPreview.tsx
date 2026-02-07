@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../utils/supabaseClient';
 import { useOrganization } from '../contexts/OrganizationContext';
 import { PageHeader, AsyncSection, EmptyState } from './widgets/Primitives';
-import { Calculator, Eye, TrendingUp, Wallet, Users, Calendar, Edit3 } from 'lucide-react';
+import { Calculator, Eye, TrendingUp, Wallet, Users, Calendar, Edit3, AlertTriangle } from 'lucide-react';
 
 // Types for database records
 type Employee = {
@@ -39,6 +39,12 @@ type PayComponent = {
 
 type CompensationWithEmployee = CompensationRow & {
   employee: Employee;
+  calculated: {
+    grossMonthly: number;
+    deductionsMonthly: number;
+    netMonthly: number;
+    annualGross: number;
+  };
 };
 
 const formatCurrency = (amount: number) => {
@@ -49,12 +55,10 @@ const formatCurrency = (amount: number) => {
   }).format(amount);
 };
 
-// Unused components removed to fix build errors
-
-const StatCard: React.FC<{ 
-  icon: React.ElementType; 
-  title: string; 
-  value: string; 
+const StatCard: React.FC<{
+  icon: React.ElementType;
+  title: string;
+  value: string;
   subtitle?: string;
   color?: string;
 }> = ({ icon: Icon, title, value, subtitle, color = "bg-blue-500" }) => (
@@ -72,19 +76,19 @@ const StatCard: React.FC<{
   </div>
 );
 
-const CompensationCard: React.FC<{ 
+const CompensationCard: React.FC<{
   compensation: CompensationWithEmployee;
   payComponents: PayComponent[];
 }> = ({ compensation, payComponents }) => {
-  // const monthlyCtc = compensation.ctc_annual / 12; // Unused for now
   const components = compensation.compensation_payload.components || [];
-  
+  const { grossMonthly, deductionsMonthly, netMonthly } = compensation.calculated;
+
   // Map component codes to names with fallback mapping
   const getComponentName = (code: string) => {
     // First try to find in payComponents
     const component = payComponents.find(c => c.code.toLowerCase() === code.toLowerCase());
     if (component) return component.name;
-    
+
     // Fallback mapping for common component codes
     const fallbackMapping: Record<string, string> = {
       'basic': 'Basic Salary',
@@ -110,32 +114,28 @@ const CompensationCard: React.FC<{
       'tds': 'Tax Deducted at Source',
       'TDS': 'Tax Deducted at Source'
     };
-    
+
     return fallbackMapping[code] || code;
   };
 
   const earnings = components.filter(c => c.amount > 0);
   const deductions = components.filter(c => c.amount < 0);
-  
-  const grossMonthly = earnings.reduce((sum, c) => sum + c.amount, 0) / 12;
-  const deductionsMonthly = Math.abs(deductions.reduce((sum, c) => sum + c.amount, 0)) / 12;
-  const netMonthly = grossMonthly - deductionsMonthly;
 
   return (
     <div className="bg-white rounded-lg border shadow-sm p-6">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h3 className="text-lg font-semibold text-gray-900">
-            {compensation.employee?.name || `User ID: ${compensation.user_id.slice(-8)}`}
+            {compensation.employee?.name || `User ID: ${compensation.user_id.slice(0, 8)}...`}
           </h3>
           <p className="text-sm text-gray-600">
-            {compensation.employee?.name 
+            {compensation.employee?.name
               ? 'Employee compensation structure'
-              : 'Employee name not found in system'
+              : 'Employee name not found'
             }
           </p>
           <p className="text-xs text-gray-500 mt-1">
-            Effective: {new Date(compensation.effective_from).toLocaleDateString()} 
+            Effective: {new Date(compensation.effective_from).toLocaleDateString()}
             {compensation.effective_to ? ` - ${new Date(compensation.effective_to).toLocaleDateString()}` : ' (Active)'}
           </p>
         </div>
@@ -200,6 +200,14 @@ const CompensationCard: React.FC<{
           </div>
         </div>
       </div>
+
+      {/* Warning if CTC doesn't match components */}
+      {Math.abs(compensation.ctc_annual - compensation.calculated.annualGross) > 100 && (
+        <div className="mt-3 flex items-center gap-2 text-xs text-amber-600 bg-amber-50 p-2 rounded">
+          <AlertTriangle className="w-4 h-4" />
+          <span>Mismatch: Components sum ({formatCurrency(compensation.calculated.annualGross)}) ≠ CTC ({formatCurrency(compensation.ctc_annual)})</span>
+        </div>
+      )}
     </div>
   );
 };
@@ -218,6 +226,7 @@ export default function PayrollPreview() {
   });
 
   useEffect(() => {
+    console.log('PayrollPreview mounted/updated. OrgId:', organizationId);
     if (organizationId) {
       loadPayrollData();
     }
@@ -237,8 +246,6 @@ export default function PayrollPreview() {
 
       if (compError) throw compError;
       setPayComponents(components || []);
-      
-      console.log('Pay components loaded:', components);
 
       // Load employee compensations with employee data (organization-specific)
       const { data: compensationData, error: compensationError } = await supabase
@@ -249,38 +256,60 @@ export default function PayrollPreview() {
         .limit(20); // Limit to recent 20 compensations for preview
 
       if (compensationError) throw compensationError;
-      
-      console.log('Raw compensation data:', compensationData);
 
-      // Transform data using the employee_name field from the table
-      const transformedData: CompensationWithEmployee[] = (compensationData || []).map(comp => ({
-        ...comp,
-        employee: {
-          id: comp.user_id,
-          name: comp.employee_name || null,
-          email: null, // Not available in compensation table
-          department: null, // Not available in compensation table  
-          role: null // Not available in compensation table
-        }
-      }));
+      console.log('Loaded compensation records:', compensationData?.length);
+
+      // Transform data and calculate metrics per employee
+      const transformedData: CompensationWithEmployee[] = (compensationData || []).map(comp => {
+        const components = comp.compensation_payload?.components || [];
+        const earnings = components.filter((c: any) => c.amount > 0);
+        const deductions = components.filter((c: any) => c.amount < 0);
+
+        const grossMonthly = earnings.reduce((sum: number, c: any) => sum + c.amount, 0) / 12;
+        const deductionsMonthly = Math.abs(deductions.reduce((sum: number, c: any) => sum + c.amount, 0)) / 12;
+        const netMonthly = grossMonthly - deductionsMonthly;
+        const annualGross = grossMonthly * 12;
+
+        return {
+          ...comp,
+          employee: {
+            id: comp.user_id,
+            name: comp.employee_name || null,
+            email: null,
+            department: null,
+            role: null
+          },
+          calculated: {
+            grossMonthly,
+            deductionsMonthly,
+            netMonthly,
+            annualGross
+          }
+        };
+      });
 
       setCompensations(transformedData);
 
       // Calculate statistics
       const totalEmployees = new Set(transformedData.map(c => c.user_id)).size;
-      const totalCtc = transformedData.reduce((sum, c) => sum + c.ctc_annual, 0);
-      const avgCtc = totalEmployees > 0 ? totalCtc / totalEmployees : 0;
-      
+
+      // Use the CALCULATED annual gross for the total payroll to match the cards
+      const totalPayroll = transformedData.reduce((sum, c) => sum + c.calculated.annualGross, 0);
+
+      // Average CTC can still use the stored CTC if we want, or the calculated one. 
+      // Let's use calculated to be consistent.
+      const avgCtc = totalEmployees > 0 ? totalPayroll / totalEmployees : 0;
+
       // Count active compensations (no end date or future end date)
       const now = new Date().toISOString().split('T')[0];
-      const activeCompensations = transformedData.filter(c => 
+      const activeCompensations = transformedData.filter(c =>
         !c.effective_to || c.effective_to >= now
       ).length;
 
       setStats({
         totalEmployees,
         avgCtc,
-        totalPayroll: totalCtc,
+        totalPayroll,
         activeCompensations
       });
 
@@ -295,16 +324,16 @@ export default function PayrollPreview() {
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       <div className="bg-white rounded-lg border shadow-sm p-6">
-        <PageHeader 
-          title="Payroll Preview" 
-          subtitle="Live view of your organization's compensation data and payroll metrics" 
+        <PageHeader
+          title="Payroll Preview"
+          subtitle="Live view of your organization's compensation data and payroll metrics"
         />
 
         <AsyncSection loading={loading} error={error}>
           {compensations.length === 0 ? (
-            <EmptyState 
-              title="No compensation data" 
-              description="No employee compensations found. Set up compensation structures in the Compensation Editor." 
+            <EmptyState
+              title="No compensation data"
+              description="No employee compensations found. Set up compensation structures in the Compensation Editor."
             />
           ) : (
             <>
@@ -319,16 +348,16 @@ export default function PayrollPreview() {
                 />
                 <StatCard
                   icon={Wallet}
-                  title="Average CTC"
+                  title="Average Annual"
                   value={formatCurrency(stats.avgCtc)}
-                  subtitle="Per employee annually"
+                  subtitle="Based on components"
                   color="bg-green-500"
                 />
                 <StatCard
                   icon={TrendingUp}
                   title="Total Payroll"
                   value={formatCurrency(stats.totalPayroll)}
-                  subtitle="Annual CTC commitment"
+                  subtitle="Annual commitment"
                   color="bg-purple-500"
                 />
                 <StatCard
@@ -349,11 +378,10 @@ export default function PayrollPreview() {
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                   {payComponents.map(component => (
                     <div key={component.id} className="text-center p-3 bg-gray-50 rounded-lg">
-                      <div className={`text-xs px-2 py-1 rounded-full mb-2 ${
-                        component.type === 'earning' ? 'bg-green-100 text-green-800' :
-                        component.type === 'deduction' ? 'bg-red-100 text-red-800' :
-                        'bg-blue-100 text-blue-800'
-                      }`}>
+                      <div className={`text-xs px-2 py-1 rounded-full mb-2 ${component.type === 'earning' ? 'bg-green-100 text-green-800' :
+                          component.type === 'deduction' ? 'bg-red-100 text-red-800' :
+                            'bg-blue-100 text-blue-800'
+                        }`}>
                         {component.type}
                       </div>
                       <p className="font-medium text-sm text-gray-900">{component.name}</p>
@@ -372,7 +400,7 @@ export default function PayrollPreview() {
                   </h3>
                   <p className="text-sm text-gray-500">Showing latest {Math.min(20, compensations.length)} records</p>
                 </div>
-                
+
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {compensations.map(compensation => (
                     <CompensationCard
@@ -389,14 +417,14 @@ export default function PayrollPreview() {
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
                   <h4 className="text-yellow-800 font-medium mb-2">⚠️ Missing Employee Data</h4>
                   <p className="text-sm text-yellow-700">
-                    Some compensation records are missing employee information. This happens when:
+                    Some compensation records are missing employee names. This happens when:
                   </p>
                   <ul className="text-sm text-yellow-700 mt-2 ml-4 list-disc">
                     <li>Employee records haven't been created in the users table</li>
-                    <li>User IDs in compensation records don't match existing users</li>
+                    <li>The compensation record was created before the employee profile</li>
                   </ul>
                   <p className="text-sm text-yellow-700 mt-2">
-                    Add employee profiles to see complete compensation details.
+                    Edit the compensation to link it to a valid user.
                   </p>
                 </div>
               )}
@@ -408,20 +436,20 @@ export default function PayrollPreview() {
                   Get started with payroll management using these tools:
                 </p>
                 <div className="flex flex-wrap gap-3">
-                  <a 
-                    href="/payroll/compensation" 
+                  <a
+                    href="/payroll/compensation"
                     className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium"
                   >
                     Edit Compensations
                   </a>
-                  <a 
-                    href="/payroll/settings" 
+                  <a
+                    href="/payroll/settings"
                     className="px-4 py-2 bg-white border border-blue-600 text-blue-600 rounded-md hover:bg-blue-50 text-sm font-medium"
                   >
                     Manage Components
                   </a>
-                  <a 
-                    href="/payroll" 
+                  <a
+                    href="/payroll"
                     className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 text-sm font-medium"
                   >
                     Payroll Dashboard

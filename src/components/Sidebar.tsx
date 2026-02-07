@@ -13,19 +13,23 @@ interface SidebarProps {
   organizationSettings: OrganizationSettings;
 }
 
-const MenuItem = ({ icon: Icon, children, to, onClick, active = false }: { 
+const MenuItem = ({ icon: Icon, children, to, onClick, active = false, onNavigate }: { 
   icon: any; 
   children: React.ReactNode; 
   to?: string;
   onClick?: () => void; 
-  active?: boolean 
+  active?: boolean;
+  onNavigate?: () => void;
 }) => {
   if (to) {
     return (
       <Link 
         to={to}
         className={`w-full flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-blue-50 rounded-lg transition-colors ${active ? 'bg-blue-50 text-blue-600' : ''}`}
-        onClick={onClick}
+        onClick={() => {
+          if (onClick) onClick();
+          if (onNavigate) onNavigate();
+        }}
       >
         <Icon className="w-5 h-5" />
         <span className="text-sm font-medium">{children}</span>
@@ -73,6 +77,8 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
       <div className={`fixed inset-y-0 left-0 w-64 bg-white shadow-lg transition-transform duration-200 ease-in-out z-20 overflow-y-auto ${
         isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
       }`}>
+        {/* Safe area spacer for Android status bar/notch */}
+        <div className="h-8 lg:h-0 bg-white"></div>
         <div className="p-4 h-full flex flex-col">
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
@@ -94,6 +100,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
               icon={HiOfficeBuilding} 
               to="/"
               active={activeView === 'dashboard'}
+              onNavigate={onClose}
             >
               Dashboard
             </MenuItem>
@@ -101,6 +108,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
               icon={HiClock}
               to="/attendance"
               active={activeView === 'attendance'}
+              onNavigate={onClose}
             >
               Attendance
             </MenuItem>
@@ -108,6 +116,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
               icon={HiUserGroup} 
               to="/team"
               active={activeView === 'team'}
+              onNavigate={onClose}
             >
               Team Management
             </MenuItem>
@@ -115,6 +124,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
               icon={HiChartBar}
               to="/reports"
               active={activeView === 'reports'}
+              onNavigate={onClose}
             >
               Reports
             </MenuItem>
@@ -123,6 +133,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
                 icon={HiTrash}
                 to="/deleteTasks"
                 active={activeView === 'deleteTasks'}
+                onNavigate={onClose}
               >
                 Delete Tasks
               </MenuItem>
@@ -131,6 +142,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
               icon={HiRefresh}
               to="/recurringTasks"
               active={activeView === 'recurringTasks'}
+              onNavigate={onClose}
             >
               Recurring Tasks
             </MenuItem>
@@ -138,6 +150,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
               icon={HiChartBar}
               to="/performanceReports"
               active={activeView === 'performanceReports'}
+              onNavigate={onClose}
             >
               Performance Reports
             </MenuItem>
@@ -145,7 +158,8 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
             <MenuItem 
               icon={HiMicrophone}
               to="/conversations"
-              active={activeView === 'conversations'} 
+              active={activeView === 'conversations'}
+              onNavigate={onClose}
             >
               Conversation Monitoring
             </MenuItem>
@@ -155,6 +169,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
                 icon={HiUsers}
                 to="/adminDashboard"
                 active={activeView === 'adminDashboard'}
+                onNavigate={onClose}
               >
                 Admin Dashboard
               </MenuItem>
@@ -163,6 +178,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
               icon={HiCalendar}
               to="/leaveManagement"
               active={activeView === 'leaveManagement'}
+              onNavigate={onClose}
             >
               Leave Management
             </MenuItem>
@@ -170,6 +186,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
               icon={HiCurrencyDollar}
               to="/payroll-preview"
               active={activeView === 'payroll-preview'}
+              onNavigate={onClose}
             >
               Payroll Preview
             </MenuItem>
@@ -178,6 +195,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
                 icon={HiCurrencyDollar}
                 to="/payroll"
                 active={activeView === 'payroll'}
+                onNavigate={onClose}
               >
                 Payroll System
               </MenuItem>
@@ -187,6 +205,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
                 icon={HiDocument}
                 to="/my-payslip"
                 active={activeView === 'my-payslip'}
+                onNavigate={onClose}
               >
                 My Payslip
               </MenuItem>
@@ -202,6 +221,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
               icon={HiCog} 
               to="/settings"
               active={activeView === 'settings'}
+              onNavigate={onClose}
             >
               Settings
             </MenuItem>

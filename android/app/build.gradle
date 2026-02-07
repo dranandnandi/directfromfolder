@@ -1,4 +1,5 @@
 apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
 
 android {
     namespace "com.dcptaskmanagmentapp.taskmanager"
@@ -7,14 +8,25 @@ android {
         applicationId "com.dcptaskmanagmentapp.taskmanager"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0.0"
+        versionCode 6
+        versionName "2.4.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
+    }
+    
+    // Java 17 compatibility required for modern Capacitor plugins
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    
+    // Kotlin JVM target (prevents "Unknown Kotlin JVM target: 21" errors)
+    kotlinOptions {
+        jvmTarget = '17'
     }
     
     signingConfigs {
@@ -43,17 +55,52 @@ repositories {
 
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
+    
+    // Kotlin BOM to align all Kotlin versions
+    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
+    
+    implementation platform('com.google.firebase:firebase-bom:34.6.0')
+    implementation 'com.google.firebase:firebase-analytics'
+    implementation 'com.google.firebase:firebase-messaging'
+    implementation "androidx.core:core:$androidxCoreVersion"
+    implementation "androidx.core:core-ktx:$androidxCoreVersion"
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation "androidx.work:work-runtime:2.9.0"
-    implementation "com.google.firebase:firebase-messaging:23.4.1"
     implementation "androidx.localbroadcastmanager:localbroadcastmanager:1.1.0"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
-    implementation project(':capacitor-cordova-android-plugins')
+    
+    // Exclude old Kotlin stdlib variants from capacitor-cordova-android-plugins (all configurations)
+    implementation(project(':capacitor-cordova-android-plugins')) {
+        exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'
+        exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8'
+    }
+    
+    androidTestImplementation(project(':capacitor-cordova-android-plugins')) {
+        exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'
+        exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8'
+    }
+}
+
+// Global exclusion of old Kotlin stdlib variants for ALL configurations
+configurations.all {
+    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'
+    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8'
+    resolutionStrategy.eachDependency { details ->
+        if (details.requested.group == 'androidx.core' && details.requested.name in ['core', 'core-ktx']) {
+            details.useVersion(rootProject.ext.androidxCoreVersion)
+            details.because('androidx.core 1.17+ requires compileSdk 36 / AGP 8.9, pin to 1.15.0 for current toolchain')
+        }
+    }
+    
+    // Additional resolution strategy to force Kotlin stdlib version
+    resolutionStrategy {
+        force "org.jetbrains.kotlin:kotlin-stdlib:1.8.22"
+    }
 }
 
 apply from: 'capacitor.build.gradle'

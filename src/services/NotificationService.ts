@@ -8,10 +8,14 @@ import {
   LocalNotifications
 } from '@capacitor/local-notifications';
 import { Capacitor } from '@capacitor/core';
+import { Dialog } from '@capacitor/dialog';
+import { Device } from '@capacitor/device';
+import { supabase } from '../utils/supabaseClient';
 
 export class NotificationService {
   private static instance: NotificationService;
   private pushToken: string | null = null;
+  private lastNotification: { title: string; body: string; image?: string; data: any } | null = null;
 
   private constructor() {}
 
@@ -84,24 +88,67 @@ export class NotificationService {
 
     // Show notification when app is in foreground
     PushNotifications.addListener('pushNotificationReceived', (notification: PushNotificationSchema) => {
-      console.log('Push notification received: ', notification);
+      console.log('Push notification received in foreground: ', JSON.stringify(notification));
+      
+      // Extract image from various possible sources
+      const data = notification.data || {};
+      const image = data.image || data.imageUrl || data.picture || data.fcm_options?.image || '';
       
       // Create local notification to show when app is in foreground
+      // Use modulo to ensure ID fits in Java int range
+      const notificationId = Math.abs(Date.now() % 2147483647);
+      
       this.showLocalNotification({
         title: notification.title || 'Task Manager',
         body: notification.body || 'You have a new notification',
-        id: Date.now(),
-        extra: notification.data
+        id: notificationId,
+        extra: { 
+          ...notification.data, 
+          originalTitle: notification.title, 
+          originalBody: notification.body,
+          image: image,
+          title: notification.title,
+          body: notification.body
+        }
       });
     });
 
-    // Handle notification tap when app is in background
-    PushNotifications.addListener('pushNotificationActionPerformed', (notification: ActionPerformed) => {
-      console.log('Push notification action performed: ', notification);
+    // Handle notification tap when app is in background/killed
+    PushNotifications.addListener('pushNotificationActionPerformed', (action: ActionPerformed) => {
+      console.log('Push notification tapped: ', JSON.stringify(action));
       
-      // Handle notification tap - navigate to relevant screen
-      this.handleNotificationTap(notification.notification.data);
+      const notification = action.notification;
+      const data = notification.data || {};
+      
+      // Firebase Console sends title/body separately, not in data when tapped from background
+      // Try to get title/body/image from multiple possible sources
+      const title = notification.title || data.title || data.notificationTitle || data.originalTitle || '';
+      const body = notification.body || data.body || data.notificationBody || data.originalBody || data.message || '';
+      
+      // Extract image URL from various possible locations
+      const image = data.image || data.imageUrl || data.picture || data.fcm_options?.image || 
+                    data.notification?.image || data.android?.imageUrl || '';
+      
+      console.log('Extracted - Title:', title, 'Body:', body, 'Image:', image);
+      
+      // Store notification data for display
+      this.lastNotification = {
+        title: title || 'Notification',
+        body: body,
+        image: image,
+        data: data
+      };
+      
+      // Dispatch custom event so the app can react to it
+      window.dispatchEvent(new CustomEvent('pushNotificationTapped', { 
+        detail: this.lastNotification 
+      }));
+      
+      // Handle navigation based on notification type
+      this.handleNotificationTap(data, title, body, image);
     });
+    
+    console.log('Push notification listeners registered successfully');
   }
 
   /**
@@ -114,7 +161,8 @@ export class NotificationService {
 
     LocalNotifications.addListener('localNotificationActionPerformed', (notificationAction) => {
       console.log('Local notification action performed: ', notificationAction);
-      this.handleNotificationTap(notificationAction.notification.extra);
+      const extra = notificationAction.notification.extra || {};
+      this.handleNotificationTap(extra, extra.title, extra.body, extra.image);
     });
   }
 
@@ -123,19 +171,63 @@ export class NotificationService {
    */
   private async sendTokenToBackend(token: string): Promise<void> {
     try {
-      // This would integrate with your Supabase backend
-      // You can store the token in the users table for push notifications
       console.log('Sending token to backend:', token);
       
-      // Example API call to save token
-      // await supabase
-      //   .from('user_devices')
-      //   .upsert({
-      //     user_id: currentUserId,
-      //     device_token: token,
-      //     platform: Capacitor.getPlatform(),
-      //     updated_at: new Date().toISOString()
-      //   });
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.log('No authenticated user, skipping token save');
+        return;
+      }
+
+      // Get device info
+      const deviceInfo = await Device.getInfo();
+      const deviceId = await Device.getId();
+
+      // Save token to database using upsert function
+      const { data, error } = await supabase.rpc('upsert_device_token', {
+        p_user_id: user.id,
+        p_fcm_token: token,
+        p_device_info: {
+          model: deviceInfo.model,
+          platform: deviceInfo.platform,
+          operatingSystem: deviceInfo.operatingSystem,
+          osVersion: deviceInfo.osVersion,
+          manufacturer: deviceInfo.manufacturer,
+          deviceId: deviceId.identifier
+        },
+        p_platform: Capacitor.getPlatform()
+      });
+
+      if (error) {
+        console.error('Error saving token to database:', error);
+        // Fallback: try direct upsert using the token column (unique constraint is on token/fcm_token)
+        const { error: insertError } = await supabase
+          .from('device_tokens')
+          .upsert({
+            user_id: user.id,
+            fcm_token: token,
+            device_info: {
+              model: deviceInfo.model,
+              platform: deviceInfo.platform,
+              osVersion: deviceInfo.osVersion,
+              deviceId: deviceId.identifier
+            },
+            platform: Capacitor.getPlatform(),
+            is_active: true,
+            last_used_at: new Date().toISOString()
+          }, {
+            onConflict: 'fcm_token'  // Existing table has UNIQUE on token column (renamed to fcm_token)
+          });
+        
+        if (insertError) {
+          console.error('Fallback insert also failed:', insertError);
+        } else {
+          console.log('Token saved via fallback insert');
+        }
+      } else {
+        console.log('Token saved successfully:', data);
+      }
     } catch (error) {
       console.error('Error sending token to backend:', error);
     }
@@ -194,22 +286,76 @@ export class NotificationService {
   /**
    * Handle notification tap - navigate to relevant screen
    */
-  private handleNotificationTap(data: any): void {
-    if (data) {
-      console.log('Handling notification tap with data:', data);
-      
+  private handleNotificationTap(data: any, title?: string, body?: string, image?: string): void {
+    console.log('Handling notification tap with data:', JSON.stringify(data));
+    console.log('Title:', title, 'Body:', body, 'Image:', image);
+    
+    // Check for known notification types first
+    if (data?.type) {
       // Navigate based on notification type
       if (data.type === 'task_overdue') {
-        // Navigate to task details
         window.location.href = `/tasks/${data.task_id}`;
+        return;
       } else if (data.type === 'task_reminder') {
-        // Navigate to task list
         window.location.href = '/tasks';
+        return;
       } else if (data.type === 'conversation_alert') {
-        // Navigate to conversations
         window.location.href = '/conversations';
+        return;
+      } else if (data.type === 'attendance') {
+        window.location.href = '/hr/attendance';
+        return;
       }
     }
+    
+    // For generic notifications - dispatch event for rich display
+    setTimeout(async () => {
+      const hasContent = (title && title.trim()) || (body && body.trim());
+      const hasImage = image && image.trim();
+      
+      // If there's an image, dispatch event for custom modal display
+      if (hasImage) {
+        window.dispatchEvent(new CustomEvent('showNotificationModal', {
+          detail: {
+            title: title || 'Notification',
+            body: body || '',
+            image: image
+          }
+        }));
+        return;
+      }
+      
+      // Otherwise show simple dialog
+      try {
+        await Dialog.alert({
+          title: hasContent ? (title || 'Notification') : 'Notification received!',
+          message: hasContent ? (body || '') : 'The notification was displayed by the system. For in-app content, notifications need to include custom data fields.',
+          buttonTitle: 'OK'
+        });
+      } catch (e) {
+        console.log('Dialog error, falling back to alert:', e);
+        // Fallback to regular alert
+        if (hasContent) {
+          alert(`${title || 'Notification'}\n\n${body || ''}`);
+        } else {
+          alert('Notification received!');
+        }
+      }
+    }, 300);
+  }
+
+  /**
+   * Get last received notification
+   */
+  getLastNotification(): { title: string; body: string; data: any } | null {
+    return this.lastNotification;
+  }
+
+  /**
+   * Clear last notification
+   */
+  clearLastNotification(): void {
+    this.lastNotification = null;
   }
 
   /**

@@ -3,6 +3,7 @@ import { HiUsers, HiClock, HiExclamationCircle, HiCheck, HiX, HiEye, HiLocationM
 import { AttendanceService } from '../../services/attendanceService';
 import { Attendance, AttendanceRegularization } from '../../models/attendance';
 import { supabase } from '../../utils/supabaseClient';
+import { formatDistance } from '../../utils/geolocation';
 import PunchInOut from './PunchInOut';
 
 interface AttendanceDetailModalProps {
@@ -516,7 +517,7 @@ const AttendanceDashboard: React.FC = () => {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
         <div>
           <h2 className="text-2xl font-semibold">Attendance Dashboard</h2>
           <p className="text-gray-600">
@@ -533,19 +534,20 @@ const AttendanceDashboard: React.FC = () => {
             )}
           </p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4">
           <input
             type="date"
             value={selectedDate}
             onChange={(e) => setSelectedDate(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 flex-shrink-0"
           />
           <button
             onClick={() => setShowRegularizations(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700"
+            className="flex items-center gap-2 px-3 py-2 sm:px-4 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm sm:text-base"
           >
             <HiExclamationCircle className="w-4 h-4" />
-            Regularizations ({regularizations.length})
+            <span className="hidden sm:inline">Regularizations</span>
+            <span className="sm:hidden">Reg.</span> ({regularizations.length})
           </button>
         </div>
       </div>
@@ -682,6 +684,11 @@ const AttendanceDashboard: React.FC = () => {
                               {(record as any).punch_in_address.substring(0, 30)}...
                             </div>
                           )}
+                          {(record as any).punch_in_distance_meters !== null && (record as any).punch_in_distance_meters !== undefined && (
+                            <div className="text-xs text-gray-600 mt-1">
+                              📍 {formatDistance((record as any).punch_in_distance_meters)}
+                            </div>
+                          )}
                         </div>
                       ) : (
                         '-'
@@ -697,6 +704,11 @@ const AttendanceDashboard: React.FC = () => {
                             <div className="text-xs text-gray-500 flex items-center gap-1 mt-1">
                               <HiLocationMarker className="w-3 h-3" />
                               {(record as any).punch_out_address.substring(0, 30)}...
+                            </div>
+                          )}
+                          {(record as any).punch_out_distance_meters !== null && (record as any).punch_out_distance_meters !== undefined && (
+                            <div className="text-xs text-gray-600 mt-1">
+                              📍 {formatDistance((record as any).punch_out_distance_meters)}
                             </div>
                           )}
                         </div>
@@ -843,6 +855,12 @@ const AttendanceDashboard: React.FC = () => {
                           );
                         }
                       })()}
+                      {/* Geofence indicator */}
+                      {(record as any).is_outside_geofence && (
+                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800" title="Attendance outside geofence">
+                          🚧 Geofence
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">

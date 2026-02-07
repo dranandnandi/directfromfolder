@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { HiClock, HiLocationMarker, HiCamera, HiCheck, HiX } from 'react-icons/hi';
+import { HiClock, HiLocationMarker, HiCamera, HiCheck, HiX, HiExclamationCircle } from 'react-icons/hi';
 import { AttendanceService } from '../../services/attendanceService';
 import { Attendance, DailyAttendanceStatus } from '../../models/attendance';
 import { supabase } from '../../utils/supabaseClient';
+import { calculateDistance, formatDistance, parseGeofenceSettings } from '../../utils/geolocation';
 
 interface CameraModalProps {
   isOpen: boolean;
@@ -126,6 +127,12 @@ const PunchInOut: React.FC = () => {
   const [showCamera, setShowCamera] = useState(false);
   const [punchType, setPunchType] = useState<'in' | 'out'>('in');
   const [userId, setUserId] = useState<string>('');
+  
+  // Geofence state
+  const [orgLocation, setOrgLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [distanceFromOrg, setDistanceFromOrg] = useState<number | null>(null);
+  const [geofenceSettings, setGeofenceSettings] = useState<any>(null);
+  const [isOutsideGeofence, setIsOutsideGeofence] = useState(false);
 
   useEffect(() => {
     initializeComponent();
@@ -148,6 +155,21 @@ const PunchInOut: React.FC = () => {
       if (!userData) return;
       setUserId(userData.id);
 
+      // Fetch organization geofence settings
+      const { data: orgData } = await supabase
+        .from('organizations')
+        .select('location_latitude, location_longitude, geofence_settings')
+        .eq('id', userData.organization_id)
+        .single();
+
+      if (orgData?.location_latitude && orgData?.location_longitude) {
+        setOrgLocation({
+          latitude: orgData.location_latitude,
+          longitude: orgData.location_longitude,
+        });
+        setGeofenceSettings(parseGeofenceSettings(orgData.geofence_settings));
+      }
+
       // Use the enhanced function to get attendance with shift details
       const { data: attendanceData } = await supabase
         .rpc('get_attendance_with_details', {
@@ -168,6 +190,9 @@ const PunchInOut: React.FC = () => {
           total_hours: todayRecord.total_hours,
           is_late: todayRecord.is_late,
           is_early_out: todayRecord.is_early_out,
+          punch_in_distance_meters: todayRecord.punch_in_distance_meters,
+          punch_out_distance_meters: todayRecord.punch_out_distance_meters,
+          is_outside_geofence: todayRecord.is_outside_geofence,
           shift: todayRecord.shift_name ? {
             id: '',
             name: todayRecord.shift_name,
@@ -206,6 +231,23 @@ const PunchInOut: React.FC = () => {
         coords.longitude
       );
       setAddress(addressText);
+
+      // Calculate distance from organization if org location is set
+      if (orgLocation) {
+        const distance = calculateDistance(
+          coords.latitude,
+          coords.longitude,
+          orgLocation.latitude,
+          orgLocation.longitude
+        );
+        setDistanceFromOrg(distance);
+
+        // Check if outside geofence
+        if (geofenceSettings?.enabled) {
+          const isOutside = distance > geofenceSettings.distance_threshold_meters;
+          setIsOutsideGeofence(isOutside);
+        }
+      }
     } catch (error) {
       console.error('Error getting location:', error);
       alert('Please enable location access to punch in/out.');
@@ -355,6 +397,13 @@ const PunchInOut: React.FC = () => {
             <div className="text-sm text-gray-600">
               {address || 'Please enable location access'}
             </div>
+            {location && distanceFromOrg !== null && (
+              <div className="text-sm mt-1">
+                Distance from office: <span className={`font-medium ${isOutsideGeofence ? 'text-orange-600' : 'text-green-600'}`}>
+                  {formatDistance(distanceFromOrg)}
+                </span>
+              </div>
+            )}
           </div>
           {!location && (
             <button
@@ -365,6 +414,44 @@ const PunchInOut: React.FC = () => {
             </button>
           )}
         </div>
+        
+        {/* Geofence Warning */}
+        {geofenceSettings?.enabled && isOutsideGeofence && location && (
+          <div className={`mt-3 p-3 rounded-lg border ${
+            geofenceSettings.enforcement_mode === 'strict' 
+              ? 'bg-red-50 border-red-200' 
+              : 'bg-orange-50 border-orange-200'
+          }`}>
+            <div className="flex items-start gap-2">
+              <HiExclamationCircle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
+                geofenceSettings.enforcement_mode === 'strict' 
+                  ? 'text-red-600' 
+                  : 'text-orange-600'
+              }`} />
+              <div className="flex-1">
+                <div className={`text-sm font-medium ${
+                  geofenceSettings.enforcement_mode === 'strict' 
+                    ? 'text-red-900' 
+                    : 'text-orange-900'
+                }`}>
+                  {geofenceSettings.enforcement_mode === 'strict' 
+                    ? '⛔ Outside Geofence - Punch Blocked' 
+                    : '⚠️ Outside Geofence - Will be Flagged'}
+                </div>
+                <div className={`text-xs mt-1 ${
+                  geofenceSettings.enforcement_mode === 'strict' 
+                    ? 'text-red-700' 
+                    : 'text-orange-700'
+                }`}>
+                  You are {formatDistance(distanceFromOrg!)} from office. 
+                  {geofenceSettings.enforcement_mode === 'strict' 
+                    ? ` Maximum allowed: ${formatDistance(geofenceSettings.distance_threshold_meters)}. Please move closer or contact admin.`
+                    : ` Attendance will be marked as outside geofence for review.`}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Attendance Status */}
@@ -376,12 +463,17 @@ const PunchInOut: React.FC = () => {
             <div className="text-gray-500 mb-4">You haven't punched in yet today</div>
             <button
               onClick={handlePunchIn}
-              disabled={!location || loading}
-              className="w-full py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
+              disabled={!location || loading || (geofenceSettings?.enabled && geofenceSettings?.enforcement_mode === 'strict' && isOutsideGeofence)}
+              className="w-full py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               <HiCheck className="w-5 h-5" />
               {loading ? 'Punching In...' : 'Punch In'}
             </button>
+            {geofenceSettings?.enabled && geofenceSettings?.enforcement_mode === 'strict' && isOutsideGeofence && (
+              <p className="text-xs text-red-600 mt-2">
+                Punch blocked due to geofence policy. Move closer to office or contact admin.
+              </p>
+            )}
           </div>
         )}
 
@@ -391,17 +483,34 @@ const PunchInOut: React.FC = () => {
               <span className="text-gray-600">Punch In Time:</span>
               <span className="font-medium">{formatTime(status.punch_in_time!)}</span>
             </div>
+            {todayAttendance?.punch_in_distance_meters && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-600">Punch In Distance:</span>
+                <span className="font-medium">{formatDistance(todayAttendance.punch_in_distance_meters)}</span>
+              </div>
+            )}
             {status.is_late && (
               <div className="text-red-600 text-sm">⚠️ Marked as late</div>
             )}
+            {todayAttendance?.is_outside_geofence && (
+              <div className="text-orange-600 text-sm flex items-center gap-1">
+                <HiExclamationCircle className="w-4 h-4" />
+                Outside geofence
+              </div>
+            )}
             <button
               onClick={handlePunchOut}
-              disabled={!location || loading}
-              className="w-full py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2"
+              disabled={!location || loading || (geofenceSettings?.enabled && geofenceSettings?.enforcement_mode === 'strict' && isOutsideGeofence)}
+              className="w-full py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               <HiX className="w-5 h-5" />
               {loading ? 'Punching Out...' : 'Punch Out'}
             </button>
+            {geofenceSettings?.enabled && geofenceSettings?.enforcement_mode === 'strict' && isOutsideGeofence && (
+              <p className="text-xs text-red-600 text-center">
+                Punch out blocked due to geofence policy. Move closer to office or contact admin.
+              </p>
+            )}
           </div>
         )}
 
@@ -411,10 +520,22 @@ const PunchInOut: React.FC = () => {
               <span className="text-gray-600">Punch In:</span>
               <span className="font-medium">{formatTime(status.punch_in_time!)}</span>
             </div>
+            {todayAttendance?.punch_in_distance_meters && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-600">Punch In Distance:</span>
+                <span className="font-medium">{formatDistance(todayAttendance.punch_in_distance_meters)}</span>
+              </div>
+            )}
             <div className="flex items-center justify-between">
               <span className="text-gray-600">Punch Out:</span>
               <span className="font-medium">{formatTime(status.punch_out_time!)}</span>
             </div>
+            {todayAttendance?.punch_out_distance_meters && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-600">Punch Out Distance:</span>
+                <span className="font-medium">{formatDistance(todayAttendance.punch_out_distance_meters)}</span>
+              </div>
+            )}
             <div className="flex items-center justify-between">
               <span className="text-gray-600">Total Hours:</span>
               <span className="font-medium">
@@ -430,6 +551,12 @@ const PunchInOut: React.FC = () => {
                 })()}
               </span>
             </div>
+            {todayAttendance?.is_outside_geofence && (
+              <div className="text-orange-600 text-sm flex items-center justify-center gap-1 pt-2 border-t">
+                <HiExclamationCircle className="w-4 h-4" />
+                Marked as outside geofence
+              </div>
+            )}
             <div className="pt-2 border-t">
               <div className="flex items-center justify-center gap-4">
                 {(() => {

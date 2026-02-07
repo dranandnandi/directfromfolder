@@ -116,15 +116,22 @@ serve(async (req) => {
 
         console.log(`Sending WhatsApp to ${formattedNumber} via ${whatsappEndpoint}`)
 
-        // Make the API call to WhatsApp service
+        // Get API key from environment
+        const WHATSAPP_API_KEY = Deno.env.get('WHATSAPP_API_KEY') || 'whatsapp-notification-secret-key';
+
+        // Make the API call to WhatsApp service with API key and organizationId
         const response = await fetch(whatsappEndpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'X-Api-Key': WHATSAPP_API_KEY,
           },
           body: JSON.stringify({
             phoneNumber: formattedNumber,
-            message: notification.message
+            message: notification.message,
+            organizationId: organizationId,
+            notificationId: notification.notificationId,
+            type: 'batch-send'
           })
         })
 

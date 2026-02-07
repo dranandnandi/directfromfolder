@@ -2,13 +2,16 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.dcptaskmanagmentapp.taskmanager',
-  appName: 'DCP Task Management',
+  appName: 'DCP Task Manager',
   webDir: 'dist',
   server: {
     androidScheme: 'https'
   },
   android: {
-    allowMixedContent: true
+    allowMixedContent: false,
+    backgroundColor: '#ffffff',
+    webContentsDebuggingEnabled: false,
+    useLegacyBridge: false
   },
   plugins: {
     PushNotifications: {
@@ -27,8 +30,9 @@ const config: CapacitorConfig = {
       showSpinner: false
     },
     StatusBar: {
-      style: "default",
-      backgroundColor: "#000000"
+      style: "dark",
+      backgroundColor: "#ffffff",
+      overlaysWebView: true
     }
   }
 };

@@ -1,32 +1,207 @@
-# Netlify Configuration for Task Manager App
+# Netlify Configuration for DCP Task Manager SPA
+# Project: v-before-pf-esic branch
+# Build: Vite + React + Capacitor
 
 [build]
   publish = "dist"
   command = "npm run build"
+  environment = { NODE_ENV = "production", NODE_VERSION = "18.16.0" }
 
-# SPA routing - redirect all routes to index.html
+# ============================================================================
+# REDIRECTS & ROUTING
+# ============================================================================
+
+# SPA Routing - Explicit routes for all pages
+# These ensure proper SPA handling for React Router
+
+# Main Dashboard
+[[redirects]]
+  from = "/"
+  to = "/index.html"
+  status = 200
+
+# Public Routes - All users
+[[redirects]]
+  from = "/attendance"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/team"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/reports"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/recurringTasks"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/performanceReports"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/leaveManagement"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/payroll-preview"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/my-payslip"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/punch"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/settings"
+  to = "/index.html"
+  status = 200
+
+# Protected Routes - Admin/Payroll
+[[redirects]]
+  from = "/deleteTasks"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/adminDashboard"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/payroll/*"
+  to = "/index.html"
+  status = 200
+
+# Conversation Monitoring (hidden but accessible)
+[[redirects]]
+  from = "/conversations"
+  to = "/index.html"
+  status = 200
+
+# Query Parameter Routes
+[[redirects]]
+  from = "/payroll-preview?*"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/payroll?*"
+  to = "/index.html"
+  status = 200
+
+# Catch-all SPA route - redirect unknown paths to index.html
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
 
-# Security headers
+# ============================================================================
+# HEADERS & SECURITY
+# ============================================================================
+
+# Global Security Headers
 [[headers]]
   for = "/*"
   [headers.values]
-    X-Frame-Options = "DENY"
+    # Prevent clickjacking attacks
+    X-Frame-Options = "SAMEORIGIN"
+    # Enable XSS filtering
     X-XSS-Protection = "1; mode=block"
+    # Prevent MIME type sniffing
     X-Content-Type-Options = "nosniff"
+    # Referrer Policy
     Referrer-Policy = "strict-origin-when-cross-origin"
-    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https:; connect-src 'self' https://*.supabase.co https://speech.googleapis.com https://generativelanguage.googleapis.com; media-src 'self' https://*.supabase.co; worker-src 'self';"
+    # Permissions Policy (formerly Feature Policy)
+    Permissions-Policy = "geolocation=(self), microphone=(), camera=(self), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()"
+    # Content Security Policy
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://apis.google.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://speech.googleapis.com https://generativelanguage.googleapis.com https://aiplatform.googleapis.com https://nominatim.openstreetmap.org; media-src 'self' https://*.supabase.co blob:; worker-src 'self'; frame-src 'self' https://accounts.google.com;"
 
-# Cache static assets
+# Cache Busting for HTML
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+    X-Content-Type-Options = "nosniff"
+
+# Aggressive Caching for Versioned Assets
 [[headers]]
   for = "/assets/*"
   [headers.values]
+    # Vite generates hashed filenames - cache indefinitely
     Cache-Control = "public, max-age=31536000, immutable"
 
-# Environment variables (set these in Netlify dashboard)
-# VITE_SUPABASE_URL=your_supabase_url
-# VITE_SUPABASE_ANON_KEY=your_anon_key
-# VITE_GEMINI_API_KEY=your_gemini_api_key
+# Cache Manifest & Service Worker
+[[headers]]
+  for = "/manifest.json"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+    Content-Type = "application/manifest+json"
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/firebase-messaging-sw.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+# ============================================================================
+# ENVIRONMENT VARIABLES (Configure in Netlify Dashboard)
+# ============================================================================
+# Required Environment Variables:
+# - VITE_SUPABASE_URL: Your Supabase project URL
+# - VITE_SUPABASE_ANON_KEY: Supabase anonymous key
+# - VITE_SUPABASE_FUNCTIONS_URL: Edge functions URL
+# - VITE_GOOGLE_AI_API_KEY: Google AI API key (for Gemini)
+#
+# Optional:
+# - VITE_FIREBASE_CONFIG: Firebase config JSON (if needed)
+# - NODE_ENV: Set to "production"
+
+# ============================================================================
+# FUNCTIONS (Optional - for serverless backends)
+# ============================================================================
+# Place serverless functions in netlify/functions/ directory
+# [functions]
+#   directory = "netlify/functions"
+#   external_node_modules = ["express"]
+#   included_files = ["./src/**"]
+
+# ============================================================================
+# CONTEXT-SPECIFIC CONFIGURATIONS
+# ============================================================================
+
+# Production Context
+[context.production]
+  command = "npm run build"
+  publish = "dist"
+  environment = { NODE_ENV = "production" }
+
+# Preview Context (for deploy previews)
+[context.deploy-preview]
+  command = "npm run build"
+  publish = "dist"
+  environment = { NODE_ENV = "staging" }
+
+# Branch Deploy Context
+[context.branch-deploy]
+  command = "npm run build"
+  publish = "dist"
+  environment = { NODE_ENV = "staging" }

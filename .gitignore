@@ -30,6 +30,7 @@ build/
 .Trashes
 ehthumbs.db
 Thumbs.db
+nul
 
 # Logs
 logs
@@ -121,3 +122,6 @@ android/app/src/main/assets/public
 
 # Bolt generated files
 .bolt/
+
+# Local Netlify folder
+.netlify

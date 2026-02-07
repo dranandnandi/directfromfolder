@@ -54,6 +54,14 @@ export interface Attendance {
   punch_out_selfie_url?: string;
   punch_out_device_info?: any;
 
+  // Geofencing Data
+  punch_in_distance_meters?: number;
+  punch_out_distance_meters?: number;
+  is_outside_geofence?: boolean;
+  geofence_override_by?: string;
+  geofence_override_reason?: string;
+  geofence_override_at?: string;
+
   // Calculated Fields
   total_hours?: number;
   break_hours: number;

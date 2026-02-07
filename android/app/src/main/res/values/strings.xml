@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">DCP Task Management</string>
     <string name="title_activity_main">DCP Task Management</string>
-    <string name="package_name">com.dcptaskmanagmentapp.taskmanager</string>
-    <string name="custom_url_scheme">com.dcptaskmanagmentapp.taskmanager</string>
+    <string name="package_name">com.example.taskmanagement</string>
+    <string name="custom_url_scheme">com.example.taskmanagement</string>
 </resources>
