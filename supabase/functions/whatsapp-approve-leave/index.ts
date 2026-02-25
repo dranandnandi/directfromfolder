@@ -88,20 +88,11 @@ serve(async (req) => {
 
     console.log('Admin verified:', adminData.name, adminData.role);
 
-    // Build query for pending leave requests
+    // Build query for pending leave requests (no FK joins)
     // Leave requests are stored as tasks with title starting with "Leave Request:"
     let query = supabaseAdmin
       .from('tasks')
-      .select(`
-        id,
-        title,
-        description,
-        created_by,
-        assigned_to,
-        status,
-        created_at,
-        creator:users!tasks_created_by_fkey(id, name, phone_number)
-      `)
+      .select('id, title, description, created_by, assigned_to, status, created_at')
       .eq('organization_id', organizationId)
       .eq('assigned_to', userId) // Assigned to this admin
       .eq('status', 'pending')
@@ -127,16 +118,32 @@ serve(async (req) => {
 
     console.log(`Found ${leaveRequests.length} pending leave request(s)`);
 
+    // Fetch creator details for all leave requests
+    const creatorIds = [...new Set(leaveRequests.map(r => r.created_by).filter(Boolean))];
+    const creatorMap: Record<string, any> = {};
+    if (creatorIds.length > 0) {
+      const { data: creators } = await supabaseAdmin
+        .from('users')
+        .select('id, name, phone_number')
+        .in('id', creatorIds);
+      if (creators) {
+        for (const c of creators) {
+          creatorMap[c.id] = c;
+        }
+      }
+    }
+
     // If employeeName specified, filter by it
     let targetRequest = leaveRequests[0]; // Default to most recent
-    
+
     if (employeeName) {
       const nameLower = employeeName.toLowerCase();
-      const matchingRequest = leaveRequests.find((req: any) => 
-        req.creator?.name?.toLowerCase().includes(nameLower) ||
-        req.title.toLowerCase().includes(nameLower)
-      );
-      
+      const matchingRequest = leaveRequests.find((req: any) => {
+        const creator = creatorMap[req.created_by];
+        return creator?.name?.toLowerCase().includes(nameLower) ||
+          req.title.toLowerCase().includes(nameLower);
+      });
+
       if (matchingRequest) {
         targetRequest = matchingRequest;
         console.log(`Found matching request for employee: ${employeeName}`);
@@ -153,7 +160,8 @@ serve(async (req) => {
 
     // Parse leave details from title and description
     const titleMatch = targetRequest.title.match(/Leave Request: (.+?) - (.+)/);
-    const creatorName = (targetRequest as any).creator?.name || (titleMatch ? titleMatch[1] : 'Employee');
+    const creatorInfo = creatorMap[targetRequest.created_by];
+    const creatorName = creatorInfo?.name || (titleMatch ? titleMatch[1] : 'Employee');
     const leaveType = titleMatch ? titleMatch[2].toLowerCase().replace(' (post facto)', '') : 'full day';
     
     // Extract dates from description
@@ -196,7 +204,7 @@ serve(async (req) => {
     console.log(`Leave request ${action}ed successfully`);
 
     // Get employee's phone number for notification
-    const employeePhone = (targetRequest as any).creator?.phone_number;
+    const employeePhone = creatorInfo?.phone_number;
     let employeeNotified = false;
 
     // Create notification for the employee

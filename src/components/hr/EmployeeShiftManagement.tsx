@@ -67,11 +67,24 @@ const EmployeeShiftManagement: React.FC = () => {
 
       if (employeesData.error) throw employeesData.error;
 
+      const latestActiveAssignmentByUser = new Map<string, any>();
+      for (const assignment of assignmentsData || []) {
+        if (assignment.effective_to) continue;
+        const prev = latestActiveAssignmentByUser.get(assignment.user_id);
+        if (!prev) {
+          latestActiveAssignmentByUser.set(assignment.user_id, assignment);
+          continue;
+        }
+        const prevTs = new Date(prev.effective_from).getTime();
+        const currentTs = new Date(assignment.effective_from).getTime();
+        if (currentTs >= prevTs) {
+          latestActiveAssignmentByUser.set(assignment.user_id, assignment);
+        }
+      }
+
       // Combine employees with their current shift assignments
       const employeesWithShifts: EmployeeWithShift[] = (employeesData.data || []).map(employee => {
-        const currentAssignment = assignmentsData.find(
-          assignment => assignment.user_id === employee.id && !assignment.effective_to
-        );
+        const currentAssignment = latestActiveAssignmentByUser.get(employee.id);
 
         return {
           ...employee,

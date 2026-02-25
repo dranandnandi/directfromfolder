@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { HiPlus, HiPencil, HiTrash, HiClock, HiUsers, HiChevronRight, HiUserAdd, HiSearch } from 'react-icons/hi';
 import { AttendanceService } from '../../services/attendanceService';
-import { Shift, EmployeeShift } from '../../models/attendance';
+import { Shift, EmployeeShift, WeekDay } from '../../models/attendance';
 import { supabase } from '../../utils/supabaseClient';
 
 interface User {
@@ -26,16 +26,30 @@ const CreateShiftModal: React.FC<CreateShiftModalProps> = ({
   organizationId,
   editingShift
 }) => {
+  const ALL_DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const;
+  const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
   const [formData, setFormData] = useState({
     name: '',
     start_time: '09:00',
     end_time: '17:00',
-    duration_hours: 8 as 8 | 9,
+    duration_hours: 8,
     break_duration_minutes: 60,
     late_threshold_minutes: 15,
-    early_out_threshold_minutes: 15
+    early_out_threshold_minutes: 15,
+    buffer_minutes: 0,
+    weekly_off_days: ['sunday'] as WeekDay[],
   });
   const [loading, setLoading] = useState(false);
+
+  const toggleWeekday = (day: WeekDay) => {
+    setFormData(prev => ({
+      ...prev,
+      weekly_off_days: prev.weekly_off_days.includes(day)
+        ? prev.weekly_off_days.filter(d => d !== day)
+        : [...prev.weekly_off_days, day],
+    }));
+  };
 
   useEffect(() => {
     if (editingShift) {
@@ -46,7 +60,9 @@ const CreateShiftModal: React.FC<CreateShiftModalProps> = ({
         duration_hours: editingShift.duration_hours,
         break_duration_minutes: editingShift.break_duration_minutes,
         late_threshold_minutes: editingShift.late_threshold_minutes,
-        early_out_threshold_minutes: editingShift.early_out_threshold_minutes
+        early_out_threshold_minutes: editingShift.early_out_threshold_minutes,
+        buffer_minutes: editingShift.buffer_minutes ?? 0,
+        weekly_off_days: (editingShift.weekly_off_days || ['sunday']) as WeekDay[],
       });
     } else {
       setFormData({
@@ -56,7 +72,9 @@ const CreateShiftModal: React.FC<CreateShiftModalProps> = ({
         duration_hours: 8,
         break_duration_minutes: 60,
         late_threshold_minutes: 15,
-        early_out_threshold_minutes: 15
+        early_out_threshold_minutes: 15,
+        buffer_minutes: 0,
+        weekly_off_days: ['sunday'],
       });
     }
   }, [editingShift, isOpen]);
@@ -150,12 +168,38 @@ const CreateShiftModal: React.FC<CreateShiftModalProps> = ({
             </label>
             <select
               value={formData.duration_hours}
-              onChange={(e) => setFormData(prev => ({ ...prev, duration_hours: parseInt(e.target.value) as 8 | 9 }))}
+              onChange={(e) => setFormData(prev => ({ ...prev, duration_hours: parseInt(e.target.value) }))}
               className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             >
-              <option value={8}>8 Hours</option>
-              <option value={9}>9 Hours</option>
+              {[4, 5, 6, 7, 8, 9, 10, 11, 12].map(h => (
+                <option key={h} value={h}>{h} Hours</option>
+              ))}
             </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Weekly Off Days
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {ALL_DAYS.map((day, i) => (
+                <button
+                  key={day}
+                  type="button"
+                  onClick={() => toggleWeekday(day)}
+                  className={`px-3 py-1.5 text-sm rounded-full border transition ${
+                    formData.weekly_off_days.includes(day)
+                      ? 'bg-violet-100 border-violet-300 text-violet-800 font-medium'
+                      : 'bg-white border-gray-200 text-gray-500 hover:border-gray-400'
+                  }`}
+                >
+                  {DAY_LABELS[i]}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              Selected: {formData.weekly_off_days.length === 0 ? 'None (all working days)' : formData.weekly_off_days.map(d => d.charAt(0).toUpperCase() + d.slice(1)).join(', ')}
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -199,6 +243,22 @@ const CreateShiftModal: React.FC<CreateShiftModalProps> = ({
               min="0"
               max="60"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Buffer / Grace Minutes
+            </label>
+            <input
+              type="number"
+              value={formData.buffer_minutes}
+              onChange={(e) => setFormData(prev => ({ ...prev, buffer_minutes: parseInt(e.target.value) || 0 }))}
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              min="0"
+              max="30"
+              placeholder="0"
+            />
+            <p className="text-xs text-gray-400 mt-1">Extra grace time before late is flagged</p>
           </div>
 
           <div className="flex justify-end space-x-3 pt-4">
@@ -552,8 +612,28 @@ const ShiftManagement: React.FC = () => {
     }
   };
 
+  const getLatestActiveAssignments = (): EmployeeShift[] => {
+    const active = assignments.filter(a => !a.effective_to);
+    const byUser = new Map<string, EmployeeShift>();
+    for (const item of active) {
+      const prev = byUser.get(item.user_id);
+      if (!prev) {
+        byUser.set(item.user_id, item);
+        continue;
+      }
+      const prevTs = new Date(prev.effective_from).getTime();
+      const currentTs = new Date(item.effective_from).getTime();
+      if (currentTs >= prevTs) {
+        byUser.set(item.user_id, item);
+      }
+    }
+    return Array.from(byUser.values()).sort(
+      (a, b) => new Date(b.effective_from).getTime() - new Date(a.effective_from).getTime()
+    );
+  };
+
   const getShiftAssignmentCount = (shiftId: string) => {
-    return assignments.filter(a => a.shift_id === shiftId && !a.effective_to).length;
+    return getLatestActiveAssignments().filter(a => a.shift_id === shiftId).length;
   };
 
   if (loading) {
@@ -617,10 +697,19 @@ const ShiftManagement: React.FC = () => {
                         </div>
                       </div>
                     </div>
-                    <div className="mt-2 flex items-center gap-4 text-xs text-gray-500">
+                    <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-gray-500">
                       <span>Break: {shift.break_duration_minutes}min</span>
                       <span>Late threshold: {shift.late_threshold_minutes}min</span>
                       <span>Early out threshold: {shift.early_out_threshold_minutes}min</span>
+                      {(shift.buffer_minutes ?? 0) > 0 && (
+                        <span>Buffer: {shift.buffer_minutes}min</span>
+                      )}
+                      {shift.weekly_off_days && shift.weekly_off_days.length > 0 && (
+                        <span className="inline-flex items-center gap-1">
+                          <span className="text-gray-400">Weekly off:</span>
+                          {shift.weekly_off_days.map(d => d.charAt(0).toUpperCase() + d.slice(0, 3)).join(', ')}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -664,7 +753,7 @@ const ShiftManagement: React.FC = () => {
           <h3 className="text-lg font-medium">Recent Shift Assignments</h3>
         </div>
         <div className="divide-y divide-gray-200">
-          {assignments.slice(0, 5).map((assignment) => (
+          {getLatestActiveAssignments().slice(0, 5).map((assignment) => (
             <div key={assignment.id} className="p-4 flex items-center justify-between">
               <div>
                 <div className="font-medium">{assignment.user?.name}</div>
@@ -678,7 +767,7 @@ const ShiftManagement: React.FC = () => {
               </div>
             </div>
           ))}
-          {assignments.length === 0 && (
+          {getLatestActiveAssignments().length === 0 && (
             <div className="p-6 text-center text-gray-500">
               No shift assignments yet.
             </div>

@@ -23,6 +23,9 @@ const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
 const LeaveManagement = lazy(() => import('./components/LeaveManagement'));
 const PunchInOut = lazy(() => import('./components/hr/PunchInOut'));
 const AttendanceDashboard = lazy(() => import('./components/hr/AttendanceDashboard'));
+const AIAttendanceConfigurator = lazy(() => import('./components/hr/AIAttendanceConfigurator'));
+const AIAttendanceReviewQueue = lazy(() => import('./components/hr/AIAttendanceReviewQueue'));
+const AIAttendanceCenter = lazy(() => import('./components/hr/AIAttendanceCenter'));
 
 // Payroll system lazy imports
 const PayrollShell = lazy(() => import('./payroll/PayrollShell'));
@@ -1047,6 +1050,39 @@ function App() {
               <Route path="/attendance" element={
                 <Suspense fallback={<div className="p-4">Loading attendance...</div>}>
                   <AttendanceDashboard />
+                </Suspense>
+              } />
+              <Route path="/attendance/ai-center" element={
+                <Suspense fallback={<div className="p-4">Loading AI center...</div>}>
+                  {userOrganizationId ? (
+                    <OrganizationProvider organizationId={userOrganizationId}>
+                      <AIAttendanceCenter />
+                    </OrganizationProvider>
+                  ) : (
+                    <div className="p-4">Loading organization...</div>
+                  )}
+                </Suspense>
+              } />
+              <Route path="/attendance/ai-configurator" element={
+                <Suspense fallback={<div className="p-4">Loading AI configurator...</div>}>
+                  {userOrganizationId ? (
+                    <OrganizationProvider organizationId={userOrganizationId}>
+                      <AIAttendanceConfigurator />
+                    </OrganizationProvider>
+                  ) : (
+                    <div className="p-4">Loading organization...</div>
+                  )}
+                </Suspense>
+              } />
+              <Route path="/attendance/ai-review" element={
+                <Suspense fallback={<div className="p-4">Loading AI review queue...</div>}>
+                  {userOrganizationId ? (
+                    <OrganizationProvider organizationId={userOrganizationId}>
+                      <AIAttendanceReviewQueue />
+                    </OrganizationProvider>
+                  ) : (
+                    <div className="p-4">Loading organization...</div>
+                  )}
                 </Suspense>
               } />
               <Route path="/punch" element={

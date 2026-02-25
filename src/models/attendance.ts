@@ -1,16 +1,22 @@
 // HR Attendance System Types
+
+/** Days of the week for weekly-off configuration */
+export type WeekDay = 'sunday' | 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday';
+
 export interface Shift {
   id: string;
   organization_id: string;
   name: string;
   start_time: string; // HH:MM format
   end_time: string; // HH:MM format
-  duration_hours: 8 | 9;
+  duration_hours: number; // 4-12 hours (flexible, not limited to 8|9)
   break_duration_minutes: number;
   late_threshold_minutes: number;
   early_out_threshold_minutes: number;
   is_active: boolean;
-  is_overnight?: boolean; // True if shift spans midnight (e.g., 8 PM to 8 AM) - optional, auto-detected
+  is_overnight?: boolean; // True if shift spans midnight
+  buffer_minutes?: number;
+  weekly_off_days: WeekDay[]; // e.g. ['sunday'] or ['friday','saturday']
   created_at: string;
   updated_at: string;
 }
@@ -73,6 +79,7 @@ export interface Attendance {
   is_absent: boolean;
   is_holiday: boolean;
   is_weekend: boolean;
+  is_half_day: boolean;
 
   // Regularization
   is_regularized: boolean;
@@ -132,6 +139,7 @@ export interface AttendanceSummary {
   total_days: number;
   present_days: number;
   absent_days: number;
+  half_day_count: number;
   late_days: number;
   early_out_days: number;
   total_hours: number;
@@ -146,7 +154,9 @@ export interface DailyAttendanceStatus {
   punch_in_time?: string;
   punch_out_time?: string;
   total_hours?: number;
+  effective_hours?: number;
   is_late: boolean;
   is_early_out: boolean;
+  is_half_day: boolean;
   shift?: Shift;
 }

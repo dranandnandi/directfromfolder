@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import {
   HiUsers,
   HiMicrophone,
@@ -61,7 +62,7 @@ interface EmployeeMetrics {
   approved_leaves: number;
   pending_leaves: number;
   post_facto_requests: number;
-  last_active: string;
+  last_active_at: string;
 }
 
 interface LeaveRequest {
@@ -96,7 +97,7 @@ interface AdminDashboardProps {
 const AdminDashboard: React.FC<AdminDashboardProps> = ({
   adminUserId
 }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'shifts' | 'employees' | 'conversations' | 'leaves' | 'whatsapp' | 'documents'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'shifts' | 'employees' | 'conversations' | 'leaves' | 'whatsapp' | 'documents' | 'ai'>('dashboard');
   const [adminUserDbId, setAdminUserDbId] = useState<string | null>(null);
   const [adminUserName, setAdminUserName] = useState<string | null>(null);
   const [employees, setEmployees] = useState<EmployeeMetrics[]>([]);
@@ -222,7 +223,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           department,
           role,
           organization_id,
-          last_active
+          last_active_at
         `)
         .eq('organization_id', adminOrganizationId) // ENFORCED ORGANIZATION FILTERING
         .eq('role', 'user'); // Changed from 'employee' to 'user'
@@ -352,7 +353,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             approved_leaves: approvedLeaves,
             pending_leaves: pendingLeaves,
             post_facto_requests: postFactoRequests,
-            last_active: employee.last_active
+            last_active_at: employee.last_active_at
           } as EmployeeMetrics;
         })
       );
@@ -655,6 +656,7 @@ Thank you for keeping us informed.`;
             { id: 'conversations', label: 'Conversations', icon: HiMicrophone },
             { id: 'leaves', label: 'Leave Management', icon: HiCalendar },
             { id: 'documents', label: 'Documents', icon: HiFolder },
+            { id: 'ai', label: 'AI Attendance', icon: HiExclamationCircle },
             { id: 'whatsapp', label: 'WhatsApp Alerts', icon: HiExclamationCircle }
           ].map(tab => (
             <button
@@ -884,6 +886,35 @@ Thank you for keeping us informed.`;
           userId={adminUserDbId}
           userName={adminUserName || undefined}
         />
+      )}
+
+      {activeTab === 'ai' && (
+        <div className="space-y-4">
+          <div className="bg-white p-6 rounded-lg shadow-sm">
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">AI Attendance Routes</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              Access all AI attendance workflows from these links.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Link to="/attendance/ai-center" className="rounded-md border p-3 hover:bg-gray-50">
+                <div className="font-medium text-gray-900">AI Attendance Center</div>
+                <div className="text-xs text-gray-600">/attendance/ai-center</div>
+              </Link>
+              <Link to="/attendance/ai-configurator" className="rounded-md border p-3 hover:bg-gray-50">
+                <div className="font-medium text-gray-900">AI Shift Configurator</div>
+                <div className="text-xs text-gray-600">/attendance/ai-configurator</div>
+              </Link>
+              <Link to="/attendance/ai-review" className="rounded-md border p-3 hover:bg-gray-50">
+                <div className="font-medium text-gray-900">AI Review Queue</div>
+                <div className="text-xs text-gray-600">/attendance/ai-review</div>
+              </Link>
+              <Link to="/payroll/attendance-intelligence" className="rounded-md border p-3 hover:bg-gray-50">
+                <div className="font-medium text-gray-900">Payroll Attendance AI</div>
+                <div className="text-xs text-gray-600">/payroll/attendance-intelligence</div>
+              </Link>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Add other tab content for conversations as needed */}

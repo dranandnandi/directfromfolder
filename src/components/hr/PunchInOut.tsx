@@ -119,6 +119,42 @@ const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCapture })
 };
 
 const PunchInOut: React.FC = () => {
+  const getLocalDateString = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const parseTimeToMinutes = (timeValue?: string) => {
+    if (!timeValue) return null;
+    const [hours, minutes] = timeValue.split(':').map(Number);
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+    return hours * 60 + minutes;
+  };
+
+  const isStaleOvernightPunchIn = (attendance: Attendance) => {
+    if (!attendance.punch_in_time || attendance.punch_out_time || !attendance.shift) return false;
+
+    const shift = attendance.shift;
+    const isOvernight = shift.is_overnight ?? (shift.end_time < shift.start_time);
+    if (!isOvernight) return false;
+
+    const shiftStartMinutes = parseTimeToMinutes(shift.start_time);
+    if (shiftStartMinutes === null) return false;
+
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    if (nowMinutes < shiftStartMinutes) return false;
+
+    const punchInTime = new Date(attendance.punch_in_time);
+    const punchInMinutes = punchInTime.getHours() * 60 + punchInTime.getMinutes();
+    const hoursOpen = (now.getTime() - punchInTime.getTime()) / (1000 * 60 * 60);
+
+    return punchInMinutes < shiftStartMinutes && hoursOpen >= 10;
+  };
+
   const [todayAttendance, setTodayAttendance] = useState<Attendance | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -170,49 +206,9 @@ const PunchInOut: React.FC = () => {
         setGeofenceSettings(parseGeofenceSettings(orgData.geofence_settings));
       }
 
-      // Use the enhanced function to get attendance with shift details
-      const { data: attendanceData } = await supabase
-        .rpc('get_attendance_with_details', {
-          p_organization_id: userData.organization_id,
-          p_date: new Date().toISOString().split('T')[0],
-          p_user_id: userData.id
-        });
-
-      if (attendanceData && attendanceData.length > 0) {
-        const todayRecord = attendanceData[0];
-        // Transform to match Attendance model
-        const attendance: any = {
-          id: todayRecord.id,
-          user_id: todayRecord.user_id,
-          date: todayRecord.date,
-          punch_in_time: todayRecord.punch_in_time,
-          punch_out_time: todayRecord.punch_out_time,
-          total_hours: todayRecord.total_hours,
-          is_late: todayRecord.is_late,
-          is_early_out: todayRecord.is_early_out,
-          punch_in_distance_meters: todayRecord.punch_in_distance_meters,
-          punch_out_distance_meters: todayRecord.punch_out_distance_meters,
-          is_outside_geofence: todayRecord.is_outside_geofence,
-          shift: todayRecord.shift_name ? {
-            id: '',
-            name: todayRecord.shift_name,
-            start_time: todayRecord.shift_start_time,
-            end_time: todayRecord.shift_end_time,
-            duration_hours: 8,
-            organization_id: userData.organization_id,
-            break_duration_minutes: 60,
-            late_threshold_minutes: 15,
-            early_out_threshold_minutes: 15,
-            is_active: true,
-            created_at: '',
-            updated_at: ''
-          } : undefined
-        };
-        setTodayAttendance(attendance);
-      } else {
-        // No attendance record found for today
-        setTodayAttendance(null);
-      }
+      // Fetch current active attendance session (overnight-safe), else today's record.
+      const attendance = await AttendanceService.getTodayOrActiveAttendance(userData.id);
+      setTodayAttendance(attendance || null);
 
       // Get current location
       await getCurrentLocation();
@@ -316,10 +312,22 @@ const PunchInOut: React.FC = () => {
   const getAttendanceStatus = (): DailyAttendanceStatus => {
     if (!todayAttendance) {
       return {
-        date: new Date().toISOString().split('T')[0],
+        date: getLocalDateString(),
         status: 'not_punched',
         is_late: false,
-        is_early_out: false
+        is_early_out: false,
+        is_half_day: false
+      };
+    }
+
+    if (isStaleOvernightPunchIn(todayAttendance)) {
+      return {
+        date: todayAttendance.date,
+        status: 'not_punched',
+        is_late: false,
+        is_early_out: false,
+        is_half_day: false,
+        shift: todayAttendance.shift
       };
     }
 
@@ -332,6 +340,7 @@ const PunchInOut: React.FC = () => {
         total_hours: todayAttendance.total_hours,
         is_late: todayAttendance.is_late,
         is_early_out: todayAttendance.is_early_out,
+        is_half_day: todayAttendance.is_half_day,
         shift: todayAttendance.shift
       };
     }
@@ -343,6 +352,7 @@ const PunchInOut: React.FC = () => {
         punch_in_time: todayAttendance.punch_in_time,
         is_late: todayAttendance.is_late,
         is_early_out: false,
+        is_half_day: todayAttendance.is_half_day,
         shift: todayAttendance.shift
       };
     }
@@ -351,7 +361,8 @@ const PunchInOut: React.FC = () => {
       date: todayAttendance.date,
       status: 'not_punched',
       is_late: false,
-      is_early_out: false
+      is_early_out: false,
+      is_half_day: false
     };
   };
 
@@ -456,7 +467,7 @@ const PunchInOut: React.FC = () => {
 
       {/* Attendance Status */}
       <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-lg font-semibold mb-4">Today's Attendance</h3>
+        <h3 className="text-lg font-semibold mb-4">Attendance Status</h3>
         
         {status.status === 'not_punched' && (
           <div className="text-center">
@@ -539,18 +550,26 @@ const PunchInOut: React.FC = () => {
             <div className="flex items-center justify-between">
               <span className="text-gray-600">Total Hours:</span>
               <span className="font-medium">
-                {(() => {
-                  if (status.punch_in_time && status.punch_out_time) {
-                    const punchIn = new Date(status.punch_in_time);
-                    const punchOut = new Date(status.punch_out_time);
-                    const diffMs = punchOut.getTime() - punchIn.getTime();
-                    const hours = diffMs / (1000 * 60 * 60);
-                    return `${hours.toFixed(2)}h`;
-                  }
-                  return '0.00h';
-                })()}
+                {todayAttendance?.total_hours != null
+                  ? `${Number(todayAttendance.total_hours).toFixed(2)}h`
+                  : (() => {
+                      if (status.punch_in_time && status.punch_out_time) {
+                        const punchIn = new Date(status.punch_in_time);
+                        const punchOut = new Date(status.punch_out_time);
+                        const hours = (punchOut.getTime() - punchIn.getTime()) / (1000 * 60 * 60);
+                        return `${hours.toFixed(2)}h`;
+                      }
+                      return '0.00h';
+                    })()
+                }
               </span>
             </div>
+            {todayAttendance?.effective_hours != null && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Effective Hours:</span>
+                <span className="font-medium">{Number(todayAttendance.effective_hours).toFixed(2)}h</span>
+              </div>
+            )}
             {todayAttendance?.is_outside_geofence && (
               <div className="text-orange-600 text-sm flex items-center justify-center gap-1 pt-2 border-t">
                 <HiExclamationCircle className="w-4 h-4" />
@@ -558,50 +577,31 @@ const PunchInOut: React.FC = () => {
               </div>
             )}
             <div className="pt-2 border-t">
-              <div className="flex items-center justify-center gap-4">
+              <div className="flex items-center justify-center gap-4 flex-wrap">
                 {(() => {
-                  // Calculate actual late/early status based on shift times
-                  if (!status.shift || !status.punch_in_time) {
-                    return <span className="text-green-600 text-sm">✓ Present</span>;
+                  if (!status.punch_in_time) {
+                    return <span className="text-gray-500 text-sm">Not punched in</span>;
                   }
 
-                  const punchInTime = new Date(status.punch_in_time);
-                  const punchInHour = punchInTime.getHours();
-                  const punchInMinute = punchInTime.getMinutes();
-                  
-                  // Parse shift start time (format: "HH:MM:SS")
-                  const [shiftStartHour, shiftStartMinute] = status.shift.start_time.split(':').map(Number);
-                  const [shiftEndHour, shiftEndMinute] = status.shift.end_time.split(':').map(Number);
-                  
-                  // Convert to minutes for comparison
-                  const punchInMinutes = punchInHour * 60 + punchInMinute;
-                  const shiftStartMinutes = shiftStartHour * 60 + shiftStartMinute;
-                  const shiftEndMinutes = shiftEndHour * 60 + shiftEndMinute;
-                  
-                  // Check if late (more than 15 minutes after shift start)
-                  const isActuallyLate = punchInMinutes > (shiftStartMinutes + 15);
-                  
-                  // Check if early out (more than 15 minutes before shift end)
-                  let isActuallyEarlyOut = false;
-                  if (status.punch_out_time) {
-                    const punchOutTime = new Date(status.punch_out_time);
-                    const punchOutMinutes = punchOutTime.getHours() * 60 + punchOutTime.getMinutes();
-                    isActuallyEarlyOut = punchOutMinutes < (shiftEndMinutes - 15);
-                  }
-
-                  // Display status based on calculations
                   const statuses = [];
-                  
-                  // Always show Present first if punched in
                   statuses.push(<span key="present" className="text-green-600 text-sm">✓ Present</span>);
-                  
-                  if (isActuallyLate) {
+
+                  if (todayAttendance?.is_late) {
                     statuses.push(<span key="late" className="text-red-600 text-sm">⚠️ Late</span>);
                   }
-                  if (isActuallyEarlyOut) {
+                  if (todayAttendance?.is_early_out) {
                     statuses.push(<span key="early" className="text-yellow-600 text-sm">⚠️ Early Out</span>);
                   }
-                  
+                  if (todayAttendance?.is_half_day) {
+                    statuses.push(<span key="half" className="text-purple-600 text-sm">½ Half Day</span>);
+                  }
+                  if (todayAttendance?.is_weekend) {
+                    statuses.push(<span key="weekend" className="text-gray-500 text-sm">📅 Weekly Off</span>);
+                  }
+                  if (todayAttendance?.is_holiday) {
+                    statuses.push(<span key="holiday" className="text-indigo-600 text-sm">🎉 Holiday</span>);
+                  }
+
                   return statuses;
                 })()}
               </div>
@@ -620,6 +620,11 @@ const PunchInOut: React.FC = () => {
               <div className="text-sm text-gray-600">
                 {status.shift.start_time} - {status.shift.end_time} ({status.shift.duration_hours}h)
               </div>
+              {(todayAttendance as any)?.shift_weekly_off_days && (todayAttendance as any).shift_weekly_off_days.length > 0 && (
+                <div className="text-xs text-gray-500 mt-1">
+                  Weekly Off: {(todayAttendance as any).shift_weekly_off_days.map((d: string) => d.slice(0, 3)).join(', ')}
+                </div>
+              )}
             </div>
           </div>
         </div>

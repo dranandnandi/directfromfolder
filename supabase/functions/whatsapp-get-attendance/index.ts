@@ -89,23 +89,40 @@ serve(async (req) => {
     const totalEmployees = allUsers?.length || 0;
     console.log(`Total employees in organization: ${totalEmployees}`);
 
-    // Get attendance for the specified date
+    // Get attendance for the specified date (no FK joins to avoid PGRST200)
+    const userIds = allUsers?.map(u => u.id) || [];
     const { data: attendanceData, error: attendanceError } = await supabaseAdmin
       .from('attendance')
-      .select(`
-        *,
-        user:users!attendance_user_id_fkey(id, name, department, whatsapp_number),
-        shift:shifts(name, start_time, end_time)
-      `)
+      .select('*')
       .eq('date', targetDate)
-      .in('user_id', allUsers?.map(u => u.id) || []);
+      .in('user_id', userIds);
 
     if (attendanceError) {
       console.error('Attendance query error:', attendanceError);
       throw new Error(`Failed to fetch attendance: ${attendanceError.message}`);
     }
 
+    // Fetch shift names for attendance records that have shift_id
+    const shiftIds = [...new Set((attendanceData || []).map(r => r.shift_id).filter(Boolean))];
+    const shiftMap: Record<string, any> = {};
+    if (shiftIds.length > 0) {
+      const { data: shifts } = await supabaseAdmin
+        .from('shifts')
+        .select('id, name, start_time, end_time')
+        .in('id', shiftIds);
+      if (shifts) {
+        for (const s of shifts) {
+          shiftMap[s.id] = s;
+        }
+      }
+    }
+
     console.log(`Found ${attendanceData?.length || 0} attendance records`);
+
+    // Build user lookup map
+    const userMap = new Map(
+      (allUsers || []).map(u => [u.id, u])
+    );
 
     // Categorize attendance
     const presentUsers: any[] = [];
@@ -123,6 +140,7 @@ serve(async (req) => {
       const record = attendanceMap.get(user.id);
 
       if (record && record.punch_in_time) {
+        const shift = record.shift_id ? shiftMap[record.shift_id] : null;
         // User is present
         const userInfo = {
           id: user.id,
@@ -132,7 +150,7 @@ serve(async (req) => {
           punch_in_time: record.punch_in_time,
           punch_out_time: record.punch_out_time,
           total_hours: record.total_hours,
-          shift_name: record.shift?.name || null,
+          shift_name: shift?.name || null,
           is_late: record.is_late || false,
           is_early_out: record.is_early_out || false,
           is_regularized: record.is_regularized || false

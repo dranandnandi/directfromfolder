@@ -37,20 +37,10 @@ serve(async (req) => {
       )
     }
 
-    // Build query
+    // Build query - fetch raw columns (no joins, avoids PostgREST FK cache issues)
     let query = supabaseClient
       .from('tasks')
-      .select(`
-        id,
-        title,
-        description,
-        status,
-        priority,
-        due_date,
-        created_at,
-        assignee:assignee_id(id, full_name),
-        creator:created_by(id, full_name)
-      `)
+      .select('id, title, description, status, priority, due_date, created_at, assigned_to, created_by')
       .eq('organization_id', organizationId)
       .order('due_date', { ascending: true, nullsFirst: false })
       .order('priority', { ascending: true })
@@ -63,9 +53,9 @@ serve(async (req) => {
 
     // Filter by user relationship
     if (assignedToMe && createdByMe) {
-      query = query.or(`assignee_id.eq.${userId},created_by.eq.${userId}`)
+      query = query.or(`assigned_to.eq.${userId},created_by.eq.${userId}`)
     } else if (assignedToMe) {
-      query = query.eq('assignee_id', userId)
+      query = query.eq('assigned_to', userId)
     } else if (createdByMe) {
       query = query.eq('created_by', userId)
     }
@@ -80,6 +70,27 @@ serve(async (req) => {
       )
     }
 
+    // Collect unique user IDs to resolve names
+    const userIds = new Set<string>()
+    for (const task of tasks) {
+      if (task.assigned_to) userIds.add(task.assigned_to)
+      if (task.created_by) userIds.add(task.created_by)
+    }
+
+    // Fetch user names in one query
+    const userMap: Record<string, string> = {}
+    if (userIds.size > 0) {
+      const { data: users } = await supabaseClient
+        .from('users')
+        .select('id, name')
+        .in('id', Array.from(userIds))
+      if (users) {
+        for (const u of users) {
+          userMap[u.id] = u.name
+        }
+      }
+    }
+
     // Format tasks for WhatsApp-friendly display
     const formattedTasks = tasks.map(task => ({
       id: task.id,
@@ -88,8 +99,8 @@ serve(async (req) => {
       status: task.status,
       priority: task.priority,
       dueDate: task.due_date,
-      assignee: task.assignee?.full_name || 'Unassigned',
-      creator: task.creator?.full_name || 'Unknown',
+      assignee: userMap[task.assigned_to] || 'Unassigned',
+      creator: userMap[task.created_by] || 'Unknown',
       createdAt: task.created_at
     }))
 

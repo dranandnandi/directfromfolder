@@ -289,7 +289,7 @@ const UserManagement: React.FC<UserManagementProps> = () => {
   };
 
   const handleDeleteUser = async (user: UserProfile) => {
-    if (!confirm(`Are you sure you want to delete ${user.name}? This action cannot be undone.`)) {
+    if (!confirm(`Are you sure you want to deactivate ${user.name}? They will be hidden from all lists and unable to log in.`)) {
       return;
     }
 
@@ -300,11 +300,11 @@ const UserManagement: React.FC<UserManagementProps> = () => {
       if (organizationId) {
         await fetchUsers(organizationId);
       }
-      alert('User deleted successfully!');
+      alert('User deactivated successfully!');
 
     } catch (error: any) {
       console.error('Error deleting user:', error);
-      alert(`Failed to delete user: ${error.message}`);
+      alert(`Failed to deactivate user: ${error.message}`);
     }
   };
 

@@ -3,6 +3,66 @@ import { Shift, EmployeeShift, Attendance, AttendanceRegularization, PunchData, 
 import { calculateDistance, parseGeofenceSettings } from '../utils/geolocation';
 
 export class AttendanceService {
+  private static toLocalDateString(date: Date = new Date()): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  private static toPreviousLocalDateString(date: Date = new Date()): string {
+    const previous = new Date(date);
+    previous.setDate(previous.getDate() - 1);
+    return this.toLocalDateString(previous);
+  }
+
+  private static parseTimeToMinutes(timeValue?: string | null): number | null {
+    if (!timeValue) return null;
+    const [hours, minutes] = timeValue.split(':').map(Number);
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+    return hours * 60 + minutes;
+  }
+
+  private static resolveAttendanceDateForPunchIn(shift?: Shift): string {
+    const now = new Date();
+    const today = this.toLocalDateString(now);
+
+    if (!shift) return today;
+
+    const isOvernight = shift.is_overnight ?? (shift.end_time < shift.start_time);
+    if (!isOvernight) return today;
+
+    const shiftEndMinutes = this.parseTimeToMinutes(shift.end_time);
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    if (shiftEndMinutes !== null && nowMinutes < shiftEndMinutes) {
+      return this.toPreviousLocalDateString(now);
+    }
+
+    return today;
+  }
+
+  private static async getActiveOpenAttendanceRecord(userId: string, lookbackDays: number = 2): Promise<Attendance | null> {
+    const fromDate = new Date();
+    fromDate.setDate(fromDate.getDate() - lookbackDays);
+    const searchFromDate = fromDate.toISOString().split('T')[0];
+
+    const { data, error } = await supabase
+      .from('attendance')
+      .select(`
+        *,
+        shift:shifts(*)
+      `)
+      .eq('user_id', userId)
+      .gte('date', searchFromDate)
+      .not('punch_in_time', 'is', null)
+      .is('punch_out_time', null)
+      .order('punch_in_time', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data || null;
+  }
 
   // ========== SHIFT MANAGEMENT ==========
 
@@ -213,7 +273,7 @@ export class AttendanceService {
   }
 
   static async getEmployeeCurrentShift(userId: string): Promise<EmployeeShift | null> {
-    const today = new Date().toISOString().split('T')[0];
+    const today = this.toLocalDateString();
 
     const { data, error } = await supabase
       .from('employee_shifts')
@@ -250,8 +310,13 @@ export class AttendanceService {
   // ========== ATTENDANCE TRACKING ==========
 
   static async punchIn(userId: string, punchData: PunchData): Promise<Attendance> {
-    const today = new Date().toISOString().split('T')[0];
     const currentTime = new Date().toISOString();
+
+    // Industry-standard guard: never allow a second punch-in while an open punch exists.
+    const existingOpenRecord = await this.getActiveOpenAttendanceRecord(userId, 2);
+    if (existingOpenRecord) {
+      throw new Error('You already have an active punch-in. Please punch out first.');
+    }
 
     // Get user's organization and current shift
     const { data: userData } = await supabase
@@ -273,15 +338,53 @@ export class AttendanceService {
     }
 
     const currentShift = await this.getEmployeeCurrentShift(userId);
+    const attendanceDate = this.resolveAttendanceDateForPunchIn(currentShift?.shift);
 
     // Upload selfie
     const selfieUrl = await this.uploadSelfie(punchData.selfie_file, userId, 'punch_in', userData.organization_id);
 
+    // Compute is_late from shift
+    let isLate = false;
+    if (currentShift?.shift) {
+      const shift = currentShift.shift;
+      const now = new Date();
+      const punchMinutes = now.getHours() * 60 + now.getMinutes();
+      const [startH, startM] = (shift.start_time || '09:00').split(':').map(Number);
+      const shiftStartMinutes = startH * 60 + startM;
+      const threshold = shift.late_threshold_minutes ?? 15;
+      isLate = punchMinutes > shiftStartMinutes + threshold;
+    }
+
+    // Check if today is a weekly off or org holiday
+    let isWeekend = false;
+    let isHoliday = false;
+    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const dutyDate = new Date(`${attendanceDate}T00:00:00`);
+    const todayDayName = dayNames[dutyDate.getDay()];
+    
+    if (currentShift?.shift) {
+      const weeklyOffs: string[] = (currentShift.shift as any).weekly_off_days || ['sunday'];
+      isWeekend = weeklyOffs.includes(todayDayName);
+    } else {
+      isWeekend = todayDayName === 'sunday';
+    }
+
+    // Check org_holidays
+    const { data: holidayData } = await supabase
+      .from('org_holidays')
+      .select('id')
+      .eq('organization_id', userData.organization_id)
+      .eq('date', attendanceDate)
+      .limit(1);
+    if (holidayData && holidayData.length > 0) {
+      isHoliday = true;
+    }
+
     // Create or update attendance record
-    const attendanceData = {
+    const attendanceData: any = {
       user_id: userId,
       organization_id: userData.organization_id,
-      date: today,
+      date: attendanceDate,
       shift_id: currentShift?.shift_id,
       punch_in_time: currentTime,
       punch_in_latitude: punchData.latitude,
@@ -291,6 +394,10 @@ export class AttendanceService {
       punch_in_device_info: punchData.device_info,
       punch_in_distance_meters: geofenceResult.distance,
       is_outside_geofence: geofenceResult.isOutsideGeofence,
+      is_late: isLate,
+      is_weekend: isWeekend,
+      is_holiday: isHoliday,
+      is_absent: false,
     };
 
     const { data, error } = await supabase
@@ -325,29 +432,19 @@ export class AttendanceService {
       );
     }
 
-    // Find active punch-in record (look back 2 days for overnight shifts)
-    const twoDaysAgo = new Date();
-    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-    const searchFromDate = twoDaysAgo.toISOString().split('T')[0];
-
-    const { data: activeRecord, error: activeError } = await supabase
-      .from('attendance')
-      .select('*, shift:shifts(id, name, is_overnight)')
-      .eq('user_id', userId)
-      .gte('date', searchFromDate)
-      .not('punch_in_time', 'is', null)
-      .is('punch_out_time', null)  // Find unpunched-out record
-      .order('punch_in_time', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (activeError || !activeRecord) {
+    // Find active punch-in record across day boundary for overnight shifts.
+    const activeRecord = await this.getActiveOpenAttendanceRecord(userId, 2);
+    if (!activeRecord) {
       throw new Error('No active punch-in found. Please punch in first.');
+    }
+    const punchInTime = activeRecord.punch_in_time;
+    if (!punchInTime) {
+      throw new Error('Active attendance record is missing punch-in time.');
     }
 
     // Validate duration for overnight shifts
     if (activeRecord.shift?.is_overnight) {
-      const punchInDate = new Date(activeRecord.punch_in_time);
+      const punchInDate = new Date(punchInTime);
       const punchOutDate = new Date(currentTime);
       const hoursDiff = (punchOutDate.getTime() - punchInDate.getTime()) / (1000 * 60 * 60);
 
@@ -362,6 +459,46 @@ export class AttendanceService {
     // Upload selfie
     const selfieUrl = await this.uploadSelfie(punchData.selfie_file, userId, 'punch_out', userData.organization_id);
 
+    // Compute hours and flags
+    const punchInDate = new Date(punchInTime);
+    const punchOutDate = new Date(currentTime);
+    const totalHours = (punchOutDate.getTime() - punchInDate.getTime()) / (1000 * 60 * 60);
+
+    // Get shift details for flag computation
+    let isEarlyOut = false;
+    let isHalfDay = false;
+    let breakMinutes = 60; // default
+    
+    if (activeRecord.shift_id) {
+      const { data: shiftData } = await supabase
+        .from('shifts')
+        .select('*')
+        .eq('id', activeRecord.shift_id)
+        .single();
+      
+      if (shiftData) {
+        breakMinutes = shiftData.break_duration_minutes ?? 60;
+        const [endH, endM] = (shiftData.end_time || '17:00').split(':').map(Number);
+        const shiftEndMinutes = endH * 60 + endM;
+        const now = punchOutDate;
+        const punchOutMinutes = now.getHours() * 60 + now.getMinutes();
+        const earlyThreshold = shiftData.early_out_threshold_minutes ?? 15;
+        
+        if (!shiftData.is_overnight) {
+          isEarlyOut = punchOutMinutes < (shiftEndMinutes - earlyThreshold);
+        }
+        
+        const effectiveHours = totalHours - (breakMinutes / 60);
+        isHalfDay = effectiveHours < (shiftData.duration_hours / 2);
+      }
+    } else {
+      // No shift: default 8hr, half day if < 4hr effective
+      const effectiveHours = totalHours - 1.0;
+      isHalfDay = effectiveHours < 4.0;
+    }
+
+    const effectiveHours = Math.max(totalHours - (breakMinutes / 60), 0);
+
     // Update by ID (not date) to handle overnight shifts correctly
     const updateData: any = {
       punch_out_time: currentTime,
@@ -371,6 +508,10 @@ export class AttendanceService {
       punch_out_selfie_url: selfieUrl,
       punch_out_device_info: punchData.device_info,
       punch_out_distance_meters: geofenceResult.distance,
+      total_hours: Math.round(totalHours * 100) / 100,
+      effective_hours: Math.round(effectiveHours * 100) / 100,
+      is_early_out: isEarlyOut,
+      is_half_day: isHalfDay,
     };
 
     // Update is_outside_geofence only if punch-out is also outside
@@ -391,7 +532,7 @@ export class AttendanceService {
   }
 
   static async getTodayAttendance(userId: string): Promise<Attendance | null> {
-    const today = new Date().toISOString().split('T')[0];
+    const today = this.toLocalDateString();
 
     const { data, error } = await supabase
       .from('attendance')
@@ -405,6 +546,12 @@ export class AttendanceService {
 
     if (error && error.code !== 'PGRST116') throw error;
     return data || null;
+  }
+
+  static async getTodayOrActiveAttendance(userId: string): Promise<Attendance | null> {
+    const active = await this.getActiveOpenAttendanceRecord(userId, 2);
+    if (active) return active;
+    return this.getTodayAttendance(userId);
   }
 
   static async getAttendanceHistory(userId: string, fromDate: string, toDate: string): Promise<Attendance[]> {
@@ -515,6 +662,67 @@ export class AttendanceService {
     return data || [];
   }
 
+  static async closeStaleOpenSessions(
+    organizationId: string,
+    adminId: string,
+    maxOpenHours: number = 18
+  ): Promise<{ closedCount: number; scannedCount: number; closedIds: string[] }> {
+    const now = new Date();
+    const safeMaxOpenHours = Number.isFinite(maxOpenHours) && maxOpenHours > 0 ? maxOpenHours : 18;
+
+    const { data: openRows, error } = await supabase
+      .from('attendance')
+      .select('id, punch_in_time, punch_out_time')
+      .eq('organization_id', organizationId)
+      .not('punch_in_time', 'is', null)
+      .is('punch_out_time', null);
+
+    if (error) throw error;
+
+    const candidates = (openRows || []).filter((row: any) => {
+      const inTime = row?.punch_in_time ? new Date(row.punch_in_time) : null;
+      if (!inTime || Number.isNaN(inTime.getTime())) return false;
+      const ageHours = (now.getTime() - inTime.getTime()) / (1000 * 60 * 60);
+      return ageHours >= safeMaxOpenHours;
+    });
+
+    const closedIds: string[] = [];
+    for (const row of candidates) {
+      const inTime = new Date(row.punch_in_time);
+      const autoOut = new Date(Math.min(now.getTime(), inTime.getTime() + safeMaxOpenHours * 60 * 60 * 1000));
+
+      const { error: updateError } = await supabase
+        .from('attendance')
+        .update({
+          punch_out_time: autoOut.toISOString(),
+          punch_out_address: `Auto-closed by admin cleanup after ${safeMaxOpenHours}h`,
+          punch_out_device_info: {
+            source: 'admin_stale_session_cleanup',
+            closed_by: adminId,
+            closed_at: now.toISOString(),
+            max_open_hours: safeMaxOpenHours
+          },
+          is_regularized: true,
+          regularized_by: adminId,
+          regularization_reason: `Auto-closed stale open attendance session (>${safeMaxOpenHours}h).`,
+          regularized_at: now.toISOString(),
+        })
+        .eq('id', row.id);
+
+      if (!updateError) {
+        closedIds.push(row.id);
+      } else {
+        console.error('Failed to auto-close stale attendance row:', row.id, updateError);
+      }
+    }
+
+    return {
+      closedCount: closedIds.length,
+      scannedCount: (openRows || []).length,
+      closedIds
+    };
+  }
+
   // ========== UTILITY FUNCTIONS ==========
 
   static async uploadSelfie(file: File, userId: string, type: 'punch_in' | 'punch_out', organizationId: string): Promise<string> {
@@ -568,6 +776,7 @@ export class AttendanceService {
     const totalDays = attendanceRecords.length;
     const presentDays = attendanceRecords.filter(a => a.punch_in_time).length;
     const absentDays = attendanceRecords.filter(a => a.is_absent).length;
+    const halfDayCount = attendanceRecords.filter(a => (a as any).is_half_day).length;
     const lateDays = attendanceRecords.filter(a => a.is_late).length;
     const earlyOutDays = attendanceRecords.filter(a => a.is_early_out).length;
     const totalHours = attendanceRecords.reduce((sum, a) => sum + (a.effective_hours || 0), 0);
@@ -578,6 +787,7 @@ export class AttendanceService {
       total_days: totalDays,
       present_days: presentDays,
       absent_days: absentDays,
+      half_day_count: halfDayCount,
       late_days: lateDays,
       early_out_days: earlyOutDays,
       total_hours: totalHours,

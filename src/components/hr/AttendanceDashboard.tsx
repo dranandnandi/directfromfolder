@@ -5,6 +5,21 @@ import { Attendance, AttendanceRegularization } from '../../models/attendance';
 import { supabase } from '../../utils/supabaseClient';
 import { formatDistance } from '../../utils/geolocation';
 import PunchInOut from './PunchInOut';
+import { useNavigate } from 'react-router-dom';
+
+interface MonthlyCumulativeRow {
+  user_id: string;
+  user_name: string;
+  user_department: string;
+  present_days: number;
+  absent_days: number;
+  half_day_count: number;
+  late_days: number;
+  early_out_days: number;
+  regularized_days: number;
+  total_effective_hours: number;
+  source: 'system' | 'override';
+}
 
 interface AttendanceDetailModalProps {
   isOpen: boolean;
@@ -47,18 +62,39 @@ const AttendanceDetailModal: React.FC<AttendanceDetailModalProps> = ({
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">Total Hours:</span>
-                <span className="text-sm font-medium">{attendance.total_hours ? `${attendance.total_hours}h` : 'N/A'}</span>
+                <span className="text-sm font-medium">{attendance.total_hours ? `${Number(attendance.total_hours).toFixed(2)}h` : 'N/A'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-gray-600">Effective Hours:</span>
+                <span className="text-sm font-medium">{attendance.effective_hours ? `${Number(attendance.effective_hours).toFixed(2)}h` : 'N/A'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">Status:</span>
-                <span className={`text-sm px-2 py-1 rounded-full ${
-                  attendance.attendance_status === 'present' ? 'bg-green-100 text-green-800' :
-                  attendance.attendance_status === 'late' ? 'bg-yellow-100 text-yellow-800' :
-                  attendance.attendance_status === 'absent' ? 'bg-red-100 text-red-800' :
-                  'bg-gray-100 text-gray-800'
-                }`}>
-                  {attendance.attendance_status || 'Unknown'}
-                </span>
+                <div className="flex flex-wrap gap-1">
+                  <span className={`text-sm px-2 py-1 rounded-full ${
+                    attendance.attendance_status === 'present' ? 'bg-green-100 text-green-800' :
+                    attendance.attendance_status === 'late' ? 'bg-yellow-100 text-yellow-800' :
+                    attendance.attendance_status === 'absent' ? 'bg-red-100 text-red-800' :
+                    'bg-gray-100 text-gray-800'
+                  }`}>
+                    {attendance.attendance_status || (attendance.punch_in_time ? 'Present' : 'Absent')}
+                  </span>
+                  {attendance.is_late && (
+                    <span className="text-sm px-2 py-1 rounded-full bg-red-100 text-red-800">Late</span>
+                  )}
+                  {attendance.is_early_out && (
+                    <span className="text-sm px-2 py-1 rounded-full bg-orange-100 text-orange-800">Early Out</span>
+                  )}
+                  {attendance.is_half_day && (
+                    <span className="text-sm px-2 py-1 rounded-full bg-purple-100 text-purple-800">Half Day</span>
+                  )}
+                  {attendance.is_weekend && (
+                    <span className="text-sm px-2 py-1 rounded-full bg-gray-100 text-gray-600">Weekly Off</span>
+                  )}
+                  {attendance.is_holiday && (
+                    <span className="text-sm px-2 py-1 rounded-full bg-indigo-100 text-indigo-800">Holiday</span>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -82,28 +118,14 @@ const AttendanceDetailModal: React.FC<AttendanceDetailModalProps> = ({
                 {attendance.punch_in_time && attendance.shift_start_time && (
                   <div className="flex justify-between">
                     <span className="text-sm text-gray-600">Late/Early:</span>
-                    <span className={`text-sm font-medium`}>
-                      {(() => {
-                        const punchInTime = new Date(attendance.punch_in_time);
-                        const punchInHour = punchInTime.getHours();
-                        const punchInMinute = punchInTime.getMinutes();
-                        
-                        // Parse shift start time (format: "HH:MM:SS")
-                        const [shiftStartHour, shiftStartMinute] = attendance.shift_start_time.split(':').map(Number);
-                        
-                        // Convert to minutes for comparison
-                        const punchInMinutes = punchInHour * 60 + punchInMinute;
-                        const shiftStartMinutes = shiftStartHour * 60 + shiftStartMinute;
-                        const diffMinutes = punchInMinutes - shiftStartMinutes;
-                        
-                        if (diffMinutes > 15) {
-                          return <span className="text-red-600">{Math.round(diffMinutes)} minutes late</span>;
-                        } else if (diffMinutes < -15) {
-                          return <span className="text-green-600">{Math.round(Math.abs(diffMinutes))} minutes early</span>;
-                        } else {
-                          return <span className="text-green-600">On time</span>;
-                        }
-                      })()}
+                    <span className="text-sm font-medium">
+                      {attendance.is_late ? (
+                        <span className="text-red-600">Late</span>
+                      ) : attendance.is_early_out ? (
+                        <span className="text-orange-600">Early Out</span>
+                      ) : (
+                        <span className="text-green-600">On time</span>
+                      )}
                     </span>
                   </div>
                 )}
@@ -322,6 +344,7 @@ const RegularizationModal: React.FC<RegularizationModalProps> = ({
 };
 
 const AttendanceDashboard: React.FC = () => {
+  const navigate = useNavigate();
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [regularizations, setRegularizations] = useState<AttendanceRegularization[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -331,6 +354,14 @@ const AttendanceDashboard: React.FC = () => {
   const [selectedAttendance, setSelectedAttendance] = useState<any>(null);
   const [organizationId, setOrganizationId] = useState<string>('');
   const [currentUserRole, setCurrentUserRole] = useState<string>('');
+  const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().slice(0, 7));
+  const [monthlyRows, setMonthlyRows] = useState<MonthlyCumulativeRow[]>([]);
+  const [monthlyLoading, setMonthlyLoading] = useState(false);
+  const [duplicateRowsCollapsed, setDuplicateRowsCollapsed] = useState(0);
+  const [aiHealth, setAiHealth] = useState<{ lastRunAt: string | null; pendingReview: number }>({
+    lastRunAt: null,
+    pendingReview: 0
+  });
 
   useEffect(() => {
     initializeData();
@@ -339,8 +370,15 @@ const AttendanceDashboard: React.FC = () => {
   useEffect(() => {
     if (organizationId) {
       fetchAttendanceData();
+      fetchAIHealth();
     }
   }, [selectedDate, organizationId]);
+
+  useEffect(() => {
+    if (organizationId) {
+      fetchMonthlyCumulative();
+    }
+  }, [organizationId, selectedMonth]);
 
   const initializeData = async () => {
     try {
@@ -408,7 +446,31 @@ const AttendanceDashboard: React.FC = () => {
         }
       }));
 
-      setAttendance(transformedData);
+      // De-duplicate by user_id to avoid duplicate rows when overlapping shift records exist.
+      const dedupedByUser = new Map<string, any>();
+      for (const row of transformedData) {
+        const existing = dedupedByUser.get(row.user_id);
+        if (!existing) {
+          dedupedByUser.set(row.user_id, row);
+          continue;
+        }
+
+        const rowHasPunch = !!row.punch_in_time;
+        const existingHasPunch = !!existing.punch_in_time;
+        const rowHasShift = !!row.shift_name;
+        const existingHasShift = !!existing.shift_name;
+        const shouldReplace =
+          (rowHasPunch && !existingHasPunch) ||
+          (rowHasShift && !existingHasShift);
+
+        if (shouldReplace) {
+          dedupedByUser.set(row.user_id, row);
+        }
+      }
+
+      const deduped = Array.from(dedupedByUser.values());
+      setDuplicateRowsCollapsed(Math.max(0, transformedData.length - deduped.length));
+      setAttendance(deduped);
 
       // Get regularizations
       const regularizationData = await AttendanceService.getPendingRegularizations(organizationId);
@@ -417,6 +479,152 @@ const AttendanceDashboard: React.FC = () => {
       console.error('Error fetching data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchMonthlyCumulative = async () => {
+    if (!organizationId || !selectedMonth) return;
+    setMonthlyLoading(true);
+    try {
+      const [year, month] = selectedMonth.split('-').map(Number);
+      const monthStart = `${selectedMonth}-01`;
+      const monthEnd = new Date(year, month, 0).toISOString().split('T')[0];
+
+      const [{ data: usersData, error: usersError }, { data: attendanceData, error: attendanceError }, { data: overridesData, error: overridesError }] = await Promise.all([
+        supabase
+          .from('users')
+          .select('id, name, department')
+          .eq('organization_id', organizationId)
+          .in('role', ['admin', 'superadmin', 'user'])
+          .order('name'),
+        supabase
+          .from('attendance')
+          .select('user_id, is_absent, is_late, is_early_out, is_half_day, is_regularized, effective_hours, punch_in_time')
+          .eq('organization_id', organizationId)
+          .gte('date', monthStart)
+          .lte('date', monthEnd),
+        supabase
+          .from('attendance_monthly_overrides')
+          .select('user_id, payload, source, approved_at, created_at')
+          .eq('organization_id', organizationId)
+          .eq('year', year)
+          .eq('month', month)
+      ]);
+
+      if (usersError) throw usersError;
+      if (attendanceError) throw attendanceError;
+      if (overridesError) throw overridesError;
+
+      const users = usersData || [];
+      const records = attendanceData || [];
+      const overrides = overridesData || [];
+
+      const agg = new Map<string, Omit<MonthlyCumulativeRow, 'user_name' | 'user_department' | 'source'>>();
+      for (const row of records) {
+        const existing = agg.get(row.user_id) || {
+          user_id: row.user_id,
+          present_days: 0,
+          absent_days: 0,
+          half_day_count: 0,
+          late_days: 0,
+          early_out_days: 0,
+          regularized_days: 0,
+          total_effective_hours: 0
+        };
+        existing.present_days += row.punch_in_time ? 1 : 0;
+        existing.absent_days += row.is_absent ? 1 : 0;
+        existing.half_day_count += (row as any).is_half_day ? 1 : 0;
+        existing.late_days += row.is_late ? 1 : 0;
+        existing.early_out_days += row.is_early_out ? 1 : 0;
+        existing.regularized_days += row.is_regularized ? 1 : 0;
+        existing.total_effective_hours += Number(row.effective_hours || 0);
+        agg.set(row.user_id, existing);
+      }
+
+      const latestOverrideByUser = new Map<string, any>();
+      for (const ov of overrides) {
+        const prev = latestOverrideByUser.get(ov.user_id);
+        if (!prev) {
+          latestOverrideByUser.set(ov.user_id, ov);
+          continue;
+        }
+        const prevTime = new Date(prev.approved_at || prev.created_at || 0).getTime();
+        const currentTime = new Date(ov.approved_at || ov.created_at || 0).getTime();
+        if (currentTime > prevTime) {
+          latestOverrideByUser.set(ov.user_id, ov);
+        }
+      }
+
+      const rows: MonthlyCumulativeRow[] = users.map((u: any) => {
+        const base = agg.get(u.id) || {
+          user_id: u.id,
+          present_days: 0,
+          absent_days: 0,
+          half_day_count: 0,
+          late_days: 0,
+          early_out_days: 0,
+          regularized_days: 0,
+          total_effective_hours: 0
+        };
+
+        const ov = latestOverrideByUser.get(u.id);
+        const p = ov?.payload || {};
+        const hasOverrideNumbers =
+          p.present_days !== undefined ||
+          p.lop_days !== undefined ||
+          p.late_occurrences !== undefined ||
+          p.early_outs !== undefined ||
+          p.overtime_hours !== undefined;
+
+        return {
+          user_id: u.id,
+          user_name: u.name || 'Unknown',
+          user_department: u.department || 'N/A',
+          present_days: hasOverrideNumbers ? Number(p.present_days || 0) : base.present_days,
+          absent_days: hasOverrideNumbers ? Number(p.lop_days || 0) : base.absent_days,
+          half_day_count: hasOverrideNumbers ? Number(p.half_days || 0) : base.half_day_count,
+          late_days: hasOverrideNumbers ? Number(p.late_occurrences || 0) : base.late_days,
+          early_out_days: hasOverrideNumbers ? Number(p.early_outs || 0) : base.early_out_days,
+          regularized_days: base.regularized_days,
+          total_effective_hours: hasOverrideNumbers
+            ? Number(p.overtime_hours || 0) + Number(base.total_effective_hours || 0)
+            : Number(base.total_effective_hours || 0),
+          source: hasOverrideNumbers ? 'override' : 'system'
+        };
+      });
+
+      setMonthlyRows(rows);
+    } catch (error) {
+      console.error('Error fetching monthly cumulative attendance:', error);
+      setMonthlyRows([]);
+    } finally {
+      setMonthlyLoading(false);
+    }
+  };
+
+  const fetchAIHealth = async () => {
+    if (!organizationId) return;
+    try {
+      const [{ data: runs }, { count }] = await Promise.all([
+        supabase
+          .from('attendance_ai_runs')
+          .select('completed_at')
+          .eq('organization_id', organizationId)
+          .eq('status', 'completed')
+          .order('completed_at', { ascending: false })
+          .limit(1),
+        supabase
+          .from('attendance_ai_review_queue_view')
+          .select('id', { count: 'exact', head: true })
+          .eq('organization_id', organizationId)
+      ]);
+
+      setAiHealth({
+        lastRunAt: runs?.[0]?.completed_at || null,
+        pendingReview: count || 0
+      });
+    } catch (error) {
+      console.error('Error fetching AI health:', error);
     }
   };
 
@@ -495,14 +703,73 @@ const AttendanceDashboard: React.FC = () => {
     }
   };
 
+  const handleCloseStaleOpenSessions = async () => {
+    if (currentUserRole !== 'admin' && currentUserRole !== 'superadmin') {
+      alert('Only admins can run stale-session cleanup.');
+      return;
+    }
+    if (!organizationId) return;
+
+    const thresholdInput = window.prompt('Close open sessions older than how many hours?', '18');
+    if (thresholdInput === null) return;
+
+    const thresholdHours = Number(thresholdInput);
+    if (!Number.isFinite(thresholdHours) || thresholdHours <= 0) {
+      alert('Please enter a valid positive number of hours.');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Close all open attendance sessions older than ${thresholdHours} hour(s)? This will auto-punch-out and mark them regularized.`
+    );
+    if (!confirmed) return;
+
+    try {
+      setLoading(true);
+      const { data: currentUser } = await supabase.auth.getUser();
+      if (!currentUser.user?.id) {
+        alert('Unable to identify current admin user.');
+        return;
+      }
+
+      const { data: adminData } = await supabase
+        .from('users')
+        .select('id')
+        .eq('auth_id', currentUser.user.id)
+        .single();
+
+      if (!adminData?.id) {
+        alert('Admin profile not found.');
+        return;
+      }
+
+      const result = await AttendanceService.closeStaleOpenSessions(
+        organizationId,
+        adminData.id,
+        thresholdHours
+      );
+
+      await fetchAttendanceData();
+      alert(
+        `Cleanup complete. Closed ${result.closedCount} stale open session(s) out of ${result.scannedCount} open session(s) scanned.`
+      );
+    } catch (error: any) {
+      console.error('Error closing stale open sessions:', error);
+      alert(`Failed to close stale sessions: ${error?.message || error}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getAttendanceStats = () => {
     const total = attendance.length;
     const present = attendance.filter(a => a.punch_in_time && !a.is_absent).length;
     const absent = attendance.filter(a => a.is_absent || !a.punch_in_time).length;
+    const halfDay = attendance.filter(a => (a as any).is_half_day).length;
     const late = attendance.filter(a => a.is_late && !a.is_regularized).length;
     const earlyOut = attendance.filter(a => a.is_early_out && !a.is_regularized).length;
     
-    return { total, present, absent, late, earlyOut };
+    return { total, present, absent, halfDay, late, earlyOut };
   };
 
   const stats = getAttendanceStats();
@@ -549,11 +816,54 @@ const AttendanceDashboard: React.FC = () => {
             <span className="hidden sm:inline">Regularizations</span>
             <span className="sm:hidden">Reg.</span> ({regularizations.length})
           </button>
+          {(currentUserRole === 'admin' || currentUserRole === 'superadmin') && (
+            <button
+              onClick={handleCloseStaleOpenSessions}
+              disabled={loading}
+              className="flex items-center gap-2 px-3 py-2 sm:px-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm sm:text-base"
+            >
+              <HiClock className="w-4 h-4" />
+              <span className="hidden sm:inline">Close Stale Opens</span>
+              <span className="sm:hidden">Close Stale</span>
+            </button>
+          )}
         </div>
       </div>
 
       {/* Punch In/Out Section */}
       <PunchInOut />
+
+      {/* AI-native attendance controls */}
+      <div className="bg-white rounded-lg shadow p-4">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold text-gray-900">AI Attendance Intelligence</h3>
+            <p className="text-sm text-gray-600">
+              Last hydration: {aiHealth.lastRunAt ? new Date(aiHealth.lastRunAt).toLocaleString() : 'Never'} | Pending review: {aiHealth.pendingReview}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => navigate('/attendance/ai-configurator')}
+              className="px-3 py-2 rounded-md bg-blue-600 text-white text-sm hover:bg-blue-700"
+            >
+              AI Shift Configurator
+            </button>
+            <button
+              onClick={() => navigate('/attendance/ai-review')}
+              className="px-3 py-2 rounded-md border text-sm hover:bg-gray-50"
+            >
+              Review Queue ({aiHealth.pendingReview})
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {duplicateRowsCollapsed > 0 && (
+        <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
+          Collapsed {duplicateRowsCollapsed} duplicate attendance row(s) for this date due to overlapping shift assignments.
+        </div>
+      )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
@@ -615,6 +925,93 @@ const AttendanceDashboard: React.FC = () => {
               <p className="text-2xl font-semibold text-gray-900">{stats.earlyOut}</p>
             </div>
           </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-lg shadow">
+          <div className="flex items-center">
+            <div className="flex-shrink-0">
+              <HiClock className="h-8 w-8 text-purple-600" />
+            </div>
+            <div className="ml-3">
+              <p className="text-sm font-medium text-gray-500">Half Day</p>
+              <p className="text-2xl font-semibold text-gray-900">{stats.halfDay}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Monthly cumulative attendance */}
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-medium">Monthly Cumulative Attendance</h3>
+            <p className="text-xs text-gray-500">System totals merged with approved monthly overrides where present.</p>
+          </div>
+          <input
+            type="month"
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employee</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Present</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Half Days</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Absent/LOP</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Late</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Early Out</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Regularized</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Effective Hours</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {monthlyLoading ? (
+                <tr>
+                  <td colSpan={9} className="px-6 py-4 text-center text-gray-500">
+                    Loading monthly cumulative data...
+                  </td>
+                </tr>
+              ) : monthlyRows.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="px-6 py-4 text-center text-gray-500">
+                    No monthly cumulative data found.
+                  </td>
+                </tr>
+              ) : (
+                monthlyRows.map((row) => (
+                  <tr key={row.user_id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900">{row.user_name}</div>
+                      <div className="text-xs text-gray-500">{row.user_department}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{row.present_days}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {row.half_day_count > 0 ? (
+                        <span className="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">{row.half_day_count}</span>
+                      ) : (
+                        <span className="text-gray-400">0</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{row.absent_days}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{row.late_days}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{row.early_out_days}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{row.regularized_days}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{row.total_effective_hours.toFixed(2)}</td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${row.source === 'override' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-700'}`}>
+                        {row.source}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -722,28 +1119,29 @@ const AttendanceDashboard: React.FC = () => {
                       {record.punch_in_time && record.punch_out_time ? (
                         <div>
                           <div className="font-medium">
-                            {/* Always calculate hours from punch times for accuracy */}
-                            {(() => {
-                              const punchIn = new Date(record.punch_in_time);
-                              const punchOut = new Date(record.punch_out_time);
-                              const diffMs = punchOut.getTime() - punchIn.getTime();
-                              const hours = diffMs / (1000 * 60 * 60);
-                              return `${hours.toFixed(2)}h`;
-                            })()}
+                            {record.total_hours != null
+                              ? `${Number(record.total_hours).toFixed(2)}h`
+                              : (() => {
+                                  const punchIn = new Date(record.punch_in_time);
+                                  const punchOut = new Date(record.punch_out_time);
+                                  const hours = (punchOut.getTime() - punchIn.getTime()) / (1000 * 60 * 60);
+                                  return `${hours.toFixed(2)}h`;
+                                })()
+                            }
                           </div>
-                          {/* Show effective hours if available */}
-                          {(() => {
-                            const punchIn = new Date(record.punch_in_time);
-                            const punchOut = new Date(record.punch_out_time);
-                            const diffMs = punchOut.getTime() - punchIn.getTime();
-                            const totalHours = diffMs / (1000 * 60 * 60);
-                            const effectiveHours = totalHours - 1.0; // Subtract 1 hour break
-                            return effectiveHours > 0 ? (
-                              <div className="text-xs text-gray-500">
-                                Effective: {effectiveHours.toFixed(2)}h
-                              </div>
-                            ) : null;
-                          })()}
+                          {(record.effective_hours != null ? Number(record.effective_hours) > 0 : true) && (
+                            <div className="text-xs text-gray-500">
+                              Effective: {record.effective_hours != null
+                                ? `${Number(record.effective_hours).toFixed(2)}h`
+                                : (() => {
+                                    const punchIn = new Date(record.punch_in_time);
+                                    const punchOut = new Date(record.punch_out_time);
+                                    const e = (punchOut.getTime() - punchIn.getTime()) / (1000 * 60 * 60) - 1.0;
+                                    return e > 0 ? `${e.toFixed(2)}h` : '0.00h';
+                                  })()
+                              }
+                            </div>
+                          )}
                         </div>
                       ) : record.punch_in_time ? (
                         <span className="text-blue-600">Still checked in</span>
@@ -753,10 +1151,9 @@ const AttendanceDashboard: React.FC = () => {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex flex-col gap-1">
-                      {/* Fix status logic */}
+                    <div className="flex flex-wrap gap-1">
+                      {/* Use DB flags for status — computed by trigger + hydrator */}
                       {(() => {
-                        // If no punch in, user is absent
                         if (!record.punch_in_time) {
                           return (
                             <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
@@ -765,7 +1162,6 @@ const AttendanceDashboard: React.FC = () => {
                           );
                         }
 
-                        // If regularized, show that first
                         if (record.is_regularized) {
                           return (
                             <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
@@ -774,86 +1170,54 @@ const AttendanceDashboard: React.FC = () => {
                           );
                         }
 
-                        // Check if user has a shift to calculate late/early
-                        const hasShift = (record as any).shift_start_time && (record as any).shift_end_time;
-                        
-                        if (hasShift) {
-                          // Parse times properly - shift times are in local time
-                          const punchInTime = new Date(record.punch_in_time);
-                          const punchInHour = punchInTime.getHours();
-                          const punchInMinute = punchInTime.getMinutes();
-                          
-                          // Parse shift start time (format: "HH:MM:SS")
-                          const [shiftStartHour, shiftStartMinute] = (record as any).shift_start_time.split(':').map(Number);
-                          const [shiftEndHour, shiftEndMinute] = (record as any).shift_end_time.split(':').map(Number);
-                          
-                          // Convert to minutes for easier comparison
-                          const punchInMinutes = punchInHour * 60 + punchInMinute;
-                          const shiftStartMinutes = shiftStartHour * 60 + shiftStartMinute;
-                          const shiftEndMinutes = shiftEndHour * 60 + shiftEndMinute;
-                          
-                          // Check if late (more than 15 minutes after shift start)
-                          const isActuallyLate = punchInMinutes > (shiftStartMinutes + 15);
-                          
-                          // Check if early out (more than 15 minutes before shift end)
-                          let isActuallyEarlyOut = false;
-                          if (record.punch_out_time) {
-                            const punchOutTime = new Date(record.punch_out_time);
-                            const punchOutMinutes = punchOutTime.getHours() * 60 + punchOutTime.getMinutes();
-                            isActuallyEarlyOut = punchOutMinutes < (shiftEndMinutes - 15);
-                          }
+                        const badges = [];
+                        badges.push(
+                          <span key="present" className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                            Present
+                          </span>
+                        );
 
-                          if (isActuallyLate && isActuallyEarlyOut) {
-                            return (
-                              <>
-                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                                  Present
-                                </span>
-                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
-                                  Late
-                                </span>
-                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
-                                  Early Out
-                                </span>
-                              </>
-                            );
-                          } else if (isActuallyLate) {
-                            return (
-                              <>
-                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                                  Present
-                                </span>
-                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
-                                  Late
-                                </span>
-                              </>
-                            );
-                          } else if (isActuallyEarlyOut) {
-                            return (
-                              <>
-                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                                  Present
-                                </span>
-                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
-                                  Early Out
-                                </span>
-                              </>
-                            );
-                          } else {
-                            return (
-                              <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                                Present
-                              </span>
-                            );
-                          }
-                        } else {
-                          // No shift assigned, just show present
-                          return (
-                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                              Present (No Shift)
+                        if (record.is_late) {
+                          badges.push(
+                            <span key="late" className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                              Late
                             </span>
                           );
                         }
+
+                        if (record.is_early_out) {
+                          badges.push(
+                            <span key="early" className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
+                              Early Out
+                            </span>
+                          );
+                        }
+
+                        if ((record as any).is_half_day) {
+                          badges.push(
+                            <span key="half" className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
+                              Half Day
+                            </span>
+                          );
+                        }
+
+                        if ((record as any).is_weekend) {
+                          badges.push(
+                            <span key="weekend" className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">
+                              Weekly Off
+                            </span>
+                          );
+                        }
+
+                        if ((record as any).is_holiday) {
+                          badges.push(
+                            <span key="holiday" className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-800">
+                              Holiday
+                            </span>
+                          );
+                        }
+
+                        return badges;
                       })()}
                       {/* Geofence indicator */}
                       {(record as any).is_outside_geofence && (

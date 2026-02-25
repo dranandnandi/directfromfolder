@@ -558,6 +558,7 @@ CREATE TABLE public.users (
   onboarding_state text DEFAULT 'new'::text CHECK (onboarding_state = ANY (ARRAY['new'::text, 'invited'::text, 'completed'::text])),
   invited_by uuid,
   last_active_at timestamp with time zone,
+  is_active boolean DEFAULT true,
   phone text,
   full_name text,
   CONSTRAINT users_pkey PRIMARY KEY (id),

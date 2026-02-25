@@ -20,7 +20,7 @@ CREATE TABLE public.attendance (
   punch_out_selfie_url text,
   punch_out_device_info jsonb,
   total_hours numeric,
-  break_hours numeric DEFAULT 1.0,
+  break_hours numeric DEFAULT 1.0 CHECK (break_hours >= 0::numeric),
   effective_hours numeric,
   is_late boolean DEFAULT false,
   is_early_out boolean DEFAULT false,
@@ -33,11 +33,78 @@ CREATE TABLE public.attendance (
   regularized_at timestamp with time zone,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
+  punch_in_distance_meters numeric,
+  punch_out_distance_meters numeric,
+  is_outside_geofence boolean DEFAULT false,
+  geofence_override_by uuid,
+  geofence_override_reason text,
+  geofence_override_at timestamp with time zone,
+  is_early_leave boolean DEFAULT false,
+  ai_hydration_meta jsonb,
+  ai_hydrated_at timestamp with time zone,
+  ai_source USER-DEFINED NOT NULL DEFAULT 'default'::ai_source_enum,
   CONSTRAINT attendance_pkey PRIMARY KEY (id),
   CONSTRAINT attendance_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
   CONSTRAINT attendance_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id),
   CONSTRAINT attendance_shift_id_fkey FOREIGN KEY (shift_id) REFERENCES public.shifts(id),
-  CONSTRAINT attendance_regularized_by_fkey FOREIGN KEY (regularized_by) REFERENCES public.users(id)
+  CONSTRAINT attendance_regularized_by_fkey FOREIGN KEY (regularized_by) REFERENCES public.users(id),
+  CONSTRAINT attendance_geofence_override_by_fkey FOREIGN KEY (geofence_override_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.attendance_ai_decisions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  run_id uuid NOT NULL,
+  user_id uuid,
+  attendance_id uuid,
+  decision_type text NOT NULL CHECK (decision_type = ANY (ARRAY['late_flag'::text, 'holiday_flag'::text, 'override_apply'::text, 'ot_calc'::text, 'attendance_status'::text])),
+  decision_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  source_priority USER-DEFINED NOT NULL DEFAULT 'ai'::ai_source_priority_enum,
+  confidence numeric,
+  human_review_required boolean NOT NULL DEFAULT false,
+  reviewed_by uuid,
+  reviewed_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT attendance_ai_decisions_pkey PRIMARY KEY (id),
+  CONSTRAINT attendance_ai_decisions_run_id_fkey FOREIGN KEY (run_id) REFERENCES public.attendance_ai_runs(id),
+  CONSTRAINT attendance_ai_decisions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT attendance_ai_decisions_attendance_id_fkey FOREIGN KEY (attendance_id) REFERENCES public.attendance(id),
+  CONSTRAINT attendance_ai_decisions_reviewed_by_fkey FOREIGN KEY (reviewed_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.attendance_ai_policies (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  policy_name text NOT NULL,
+  policy_version integer NOT NULL DEFAULT 1,
+  status USER-DEFINED NOT NULL DEFAULT 'draft'::ai_policy_status_enum,
+  instruction_text text NOT NULL,
+  instruction_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  model_name text NOT NULL DEFAULT 'gemini-2.5-flash'::text,
+  confidence_score numeric,
+  created_by uuid,
+  approved_by uuid,
+  approved_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT attendance_ai_policies_pkey PRIMARY KEY (id),
+  CONSTRAINT attendance_ai_policies_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id),
+  CONSTRAINT attendance_ai_policies_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id),
+  CONSTRAINT attendance_ai_policies_approved_by_fkey FOREIGN KEY (approved_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.attendance_ai_runs (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  policy_id uuid,
+  run_type text NOT NULL CHECK (run_type = ANY (ARRAY['weekly_hydration'::text, 'shift_compile'::text, 'payroll_preview'::text])),
+  period_start date,
+  period_end date,
+  input_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
+  output_summary jsonb NOT NULL DEFAULT '{}'::jsonb,
+  status USER-DEFINED NOT NULL DEFAULT 'running'::ai_run_status_enum,
+  error_message text,
+  started_at timestamp with time zone NOT NULL DEFAULT now(),
+  completed_at timestamp with time zone,
+  CONSTRAINT attendance_ai_runs_pkey PRIMARY KEY (id),
+  CONSTRAINT attendance_ai_runs_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id),
+  CONSTRAINT attendance_ai_runs_policy_id_fkey FOREIGN KEY (policy_id) REFERENCES public.attendance_ai_policies(id)
 );
 CREATE TABLE public.attendance_import_batches (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -82,6 +149,7 @@ CREATE TABLE public.attendance_monthly_overrides (
   approved_by uuid,
   approved_at timestamp with time zone,
   created_at timestamp with time zone DEFAULT now(),
+  source text NOT NULL DEFAULT ('manual'::text)::manual_ai_source,
   CONSTRAINT attendance_monthly_overrides_pkey PRIMARY KEY (id),
   CONSTRAINT attendance_monthly_overrides_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id),
   CONSTRAINT attendance_monthly_overrides_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
@@ -155,10 +223,13 @@ CREATE TABLE public.conversation_logs (
 CREATE TABLE public.device_tokens (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid,
-  token text NOT NULL UNIQUE,
-  device_type text NOT NULL CHECK (device_type = ANY (ARRAY['android'::text, 'ios'::text, 'web'::text])),
+  fcm_token text NOT NULL UNIQUE,
+  platform text NOT NULL CHECK (platform = ANY (ARRAY['android'::text, 'ios'::text, 'web'::text])),
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
+  device_info jsonb DEFAULT '{}'::jsonb,
+  is_active boolean DEFAULT true,
+  last_used_at timestamp with time zone DEFAULT now(),
   CONSTRAINT device_tokens_pkey PRIMARY KEY (id),
   CONSTRAINT device_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
 );
@@ -167,13 +238,16 @@ CREATE TABLE public.employee_compensation (
   user_id uuid NOT NULL,
   effective_from date NOT NULL,
   effective_to date,
-  ctc_annual numeric NOT NULL,
+  ctc_annual numeric NOT NULL CHECK (ctc_annual > 0::numeric),
   pay_schedule text NOT NULL DEFAULT 'monthly'::text,
   currency text NOT NULL DEFAULT 'INR'::text,
   compensation_payload jsonb NOT NULL,
   created_at timestamp with time zone DEFAULT now(),
+  employee_name text,
+  organization_id uuid,
   CONSTRAINT employee_compensation_pkey PRIMARY KEY (id),
-  CONSTRAINT employee_compensation_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+  CONSTRAINT employee_compensation_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT employee_compensation_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id)
 );
 CREATE TABLE public.employee_hr_data (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -195,6 +269,9 @@ CREATE TABLE public.employee_pay_overrides (
   period_year integer NOT NULL,
   override_payload jsonb NOT NULL,
   created_at timestamp with time zone DEFAULT now(),
+  source text NOT NULL DEFAULT ('manual'::text)::manual_ai_source,
+  reason_code text,
+  explainability jsonb,
   CONSTRAINT employee_pay_overrides_pkey PRIMARY KEY (id),
   CONSTRAINT employee_pay_overrides_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
 );
@@ -214,7 +291,7 @@ CREATE TABLE public.employee_shifts (
 CREATE TABLE public.notification_preferences (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid,
-  type text NOT NULL CHECK (type = ANY (ARRAY['task_due'::text, 'task_assigned'::text, 'task_updated'::text, 'task_completed'::text, 'task_comment'::text])),
+  type text NOT NULL CHECK (type = ANY (ARRAY['task_due'::text, 'task_assigned'::text, 'task_updated'::text, 'task_completed'::text, 'task_comment'::text, 'task_urgent'::text, 'task_overdue'::text, 'leave_request_new'::text, 'leave_request_approved'::text, 'leave_request_rejected'::text])),
   enabled boolean DEFAULT true,
   advance_notice interval DEFAULT '1 day'::interval,
   created_at timestamp with time zone DEFAULT now(),
@@ -226,7 +303,7 @@ CREATE TABLE public.notifications (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid,
   task_id uuid,
-  type text NOT NULL CHECK (type = ANY (ARRAY['task_due'::text, 'task_assigned'::text, 'task_updated'::text, 'task_completed'::text, 'task_comment'::text])),
+  type text NOT NULL CHECK (type = ANY (ARRAY['task_due'::text, 'task_assigned'::text, 'task_updated'::text, 'task_completed'::text, 'task_comment'::text, 'task_urgent'::text, 'task_overdue'::text, 'leave_request_new'::text, 'leave_request_approved'::text, 'leave_request_rejected'::text])),
   title text NOT NULL,
   message text NOT NULL,
   read boolean DEFAULT false,
@@ -257,6 +334,27 @@ CREATE TABLE public.org_statutory_profiles (
   pt_reg_no text,
   CONSTRAINT org_statutory_profiles_pkey PRIMARY KEY (id),
   CONSTRAINT org_statutory_profiles_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id)
+);
+CREATE TABLE public.organization_documents (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  uploaded_by uuid NOT NULL,
+  file_name text NOT NULL,
+  original_file_name text NOT NULL,
+  file_path text NOT NULL,
+  file_url text NOT NULL,
+  file_size bigint NOT NULL,
+  mime_type text NOT NULL,
+  category text DEFAULT 'general'::text,
+  description text,
+  tags ARRAY DEFAULT '{}'::text[],
+  is_public boolean DEFAULT false,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  deleted_at timestamp with time zone,
+  CONSTRAINT organization_documents_pkey PRIMARY KEY (id),
+  CONSTRAINT organization_documents_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id),
+  CONSTRAINT organization_documents_uploaded_by_fkey FOREIGN KEY (uploaded_by) REFERENCES public.users(id)
 );
 CREATE TABLE public.organization_invites (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -310,6 +408,10 @@ CREATE TABLE public.organizations (
   billing_email text,
   phone text,
   address text,
+  location_latitude numeric CHECK (location_latitude IS NULL OR location_latitude >= '-90'::integer::numeric AND location_latitude <= 90::numeric),
+  location_longitude numeric CHECK (location_longitude IS NULL OR location_longitude >= '-180'::integer::numeric AND location_longitude <= 180::numeric),
+  location_address text,
+  geofence_settings jsonb DEFAULT '{"enabled": true, "enforcement_mode": "strict", "allow_admin_override": true, "distance_threshold_meters": 500}'::jsonb,
   CONSTRAINT organizations_pkey PRIMARY KEY (id),
   CONSTRAINT organizations_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES public.users(id)
 );
@@ -358,8 +460,8 @@ CREATE TABLE public.payroll_runs (
   status text,
   pf_employee text,
   CONSTRAINT payroll_runs_pkey PRIMARY KEY (id),
-  CONSTRAINT payroll_runs_payroll_period_id_fkey FOREIGN KEY (payroll_period_id) REFERENCES public.payroll_periods(id),
-  CONSTRAINT payroll_runs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+  CONSTRAINT payroll_runs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT payroll_runs_payroll_period_id_fkey FOREIGN KEY (payroll_period_id) REFERENCES public.payroll_periods(id)
 );
 CREATE TABLE public.performance_reports (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -453,6 +555,8 @@ CREATE TABLE public.shifts (
   is_active boolean DEFAULT true,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
+  is_overnight boolean DEFAULT false,
+  buffer_minutes integer NOT NULL DEFAULT 0,
   CONSTRAINT shifts_pkey PRIMARY KEY (id),
   CONSTRAINT shifts_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id)
 );
@@ -540,7 +644,9 @@ CREATE TABLE public.users (
   onboarding_state text DEFAULT 'new'::text CHECK (onboarding_state = ANY (ARRAY['new'::text, 'invited'::text, 'completed'::text])),
   invited_by uuid,
   last_active_at timestamp with time zone,
+  is_active boolean DEFAULT true,
   phone text,
+  full_name text,
   CONSTRAINT users_pkey PRIMARY KEY (id),
   CONSTRAINT users_auth_id_fkey FOREIGN KEY (auth_id) REFERENCES auth.users(id),
   CONSTRAINT users_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id)

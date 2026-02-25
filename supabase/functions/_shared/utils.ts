@@ -42,15 +42,21 @@ export function cors(req: Request) {
   };
 }
 
-/** Gemini 2.5 Flash Pro client (uses ALLGOOGLE_KEY) */
-export async function gemini(parts: any[], safetySettings: any = {}) {
+/** Gemini 2.5 Flash client (uses ALLGOOGLE_KEY) */
+export async function gemini(parts: any[], safetySettings: any[] = []) {
   const key = Deno.env.get("ALLGOOGLE_KEY") ?? "";
   if (!key) throw new Error("Missing ALLGOOGLE_KEY");
+  const model = "gemini-2.5-flash";
   const url =
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-pro:generateContent?key=" +
+    "https://generativelanguage.googleapis.com/v1beta/models/" +
+    model +
+    ":generateContent?key=" +
     key;
 
-  const body = { contents: [{ role: "user", parts }], safetySettings };
+  const body: any = { contents: [{ role: "user", parts }] };
+  if (Array.isArray(safetySettings) && safetySettings.length > 0) {
+    body.safetySettings = safetySettings;
+  }
   const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -62,4 +68,55 @@ export async function gemini(parts: any[], safetySettings: any = {}) {
   const text =
     json?.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join("") ?? "";
   return text;
+}
+
+export function extractJsonObject(text: string) {
+  const fenced =
+    text.match(/```json\s*([\s\S]*?)\s*```/i) ||
+    text.match(/```\s*([\s\S]*?)\s*```/i);
+  const raw = (fenced ? fenced[1] : text).trim();
+  return JSON.parse(raw);
+}
+
+export async function anthropic(
+  system: string,
+  userText: string,
+  model = "claude-3-5-haiku-20241022",
+) {
+  const key = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
+  if (!key) throw new Error("Missing ANTHROPIC_API_KEY");
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": key,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 1200,
+      temperature: 0.2,
+      system,
+      messages: [{ role: "user", content: userText }],
+    }),
+  });
+  if (!res.ok) throw new Error(`Anthropic error ${res.status}: ${await res.text()}`);
+  const json = await res.json();
+  return json?.content?.map((c: any) => c?.text ?? "").join("") ?? "";
+}
+
+export async function llmJson(opts: {
+  provider: "gemini" | "haiku";
+  parts?: any[];
+  system?: string;
+  userText?: string;
+}) {
+  if (opts.provider === "haiku") {
+    const text = await anthropic(opts.system ?? "", opts.userText ?? "");
+    return extractJsonObject(text);
+  }
+
+  const text = await gemini(opts.parts ?? []);
+  return extractJsonObject(text);
 }

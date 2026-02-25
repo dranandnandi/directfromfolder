@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { HiX, HiOfficeBuilding, HiChartBar, HiCog, HiQuestionMarkCircle, HiUserGroup, HiTrash, HiRefresh, HiUsers, HiCalendar, HiClock, HiCurrencyDollar, HiDocument } from 'react-icons/hi';
+import { HiX, HiOfficeBuilding, HiChartBar, HiCog, HiQuestionMarkCircle, HiUserGroup, HiTrash, HiRefresh, HiUsers, HiCalendar, HiClock, HiCurrencyDollar, HiDocument, HiLightningBolt } from 'react-icons/hi';
 import { supabase } from '../utils/supabaseClient';
 import { OrganizationSettings } from '../models/task';
 import dcpLogo from '/notification-icon.svg';
@@ -58,6 +58,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
   };
 
   const activeView = getActiveView();
+  const isAttendanceRoute = location.pathname.startsWith('/attendance');
 
   const handleNavigation = (view: string) => {
     onNavigate(view);
@@ -107,11 +108,21 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
             <MenuItem 
               icon={HiClock}
               to="/attendance"
-              active={activeView === 'attendance'}
+              active={activeView === 'attendance' || isAttendanceRoute}
               onNavigate={onClose}
             >
               Attendance
             </MenuItem>
+            {(userRole === 'admin' || userRole === 'superadmin') && (
+              <MenuItem
+                icon={HiLightningBolt}
+                to="/attendance/ai-center"
+                active={activeView === 'attendance/ai-center'}
+                onNavigate={onClose}
+              >
+                AI Attendance
+              </MenuItem>
+            )}
             <MenuItem 
               icon={HiUserGroup} 
               to="/team"

@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../utils/supabaseClient";
 import { useOrganization } from "../contexts/OrganizationContext";
-import { PageHeader, AsyncSection, EmptyState } from "./widgets/Primitives";
+import { AsyncSection } from "./widgets/Primitives";
 import CompensationChat from "./CompensationChatNew";
 
 /** ================= Schema-aligned types ================= */
@@ -55,6 +55,15 @@ function fmtINR(n?: number) {
 }
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
+function computeAnnualCtcFromComponents(components: { component_code: string; amount: number }[] = []) {
+  return Math.round(
+    components.reduce((sum, line) => {
+      const amt = Number(line?.amount) || 0;
+      return amt > 0 ? sum + amt : sum;
+    }, 0),
+  );
+}
+
 /** ============== Component ============== */
 export default function CompensationEditor() {
   const { organizationId } = useOrganization();
@@ -64,6 +73,8 @@ export default function CompensationEditor() {
   // employee picker
   const [query, setQuery] = useState("");
   const [userList, setUserList] = useState<Employee[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
   const [userId, setUserId] = useState<string>("");
 
   // components catalog
@@ -101,33 +112,41 @@ export default function CompensationEditor() {
     })();
   }, [organizationId]);
 
-  // ========= Search users by query =========
+  // ========= Load all org employees once =========
   useEffect(() => {
-    let active = true;
+    if (!organizationId) return;
     (async () => {
       try {
-        // Search users directly from Supabase
-        let usersQuery = supabase
+        const { data: users, error } = await supabase
           .from('users')
           .select('id, name, department, email')
-          .eq('organization_id', organizationId);
-
-        if (query.trim()) {
-          usersQuery = usersQuery.or(`name.ilike.%${query}%,email.ilike.%${query}%`);
-        }
-
-        const { data: users, error } = await usersQuery.limit(50);
-        
+          .eq('organization_id', organizationId)
+          .order('name');
         if (error) throw new Error(error.message);
-        if (active) setUserList(users || []);
+        setAllEmployees(users || []);
+        setUserList(users || []);
       } catch (e: any) {
         console.error(e);
       }
     })();
-    return () => {
-      active = false;
-    };
-  }, [query, organizationId]);
+  }, [organizationId]);
+
+  // ========= Filter users by query =========
+  useEffect(() => {
+    if (!query.trim()) {
+      setUserList(allEmployees);
+      return;
+    }
+    const q = query.toLowerCase();
+    setUserList(
+      allEmployees.filter(
+        (u) =>
+          (u.name && u.name.toLowerCase().includes(q)) ||
+          (u.email && u.email.toLowerCase().includes(q)) ||
+          (u.department && u.department.toLowerCase().includes(q))
+      )
+    );
+  }, [query, allEmployees]);
 
   // ========= Load compensation history for selected user =========
   useEffect(() => {
@@ -287,8 +306,11 @@ export default function CompensationEditor() {
         }
       }
     }
+    const componentCtc = computeAnnualCtcFromComponents(editing.compensation_payload?.components || []);
+    const normalizedCtc = Number(editing.ctc_annual) > 0 ? Math.round(Number(editing.ctc_annual)) : componentCtc;
+
     // Basic sanity
-    if (!editing.ctc_annual || editing.ctc_annual <= 0) {
+    if (!normalizedCtc || normalizedCtc <= 0) {
       return alert("CTC (annual) must be a positive number.");
     }
     if ((editing.compensation_payload?.components || []).some((c) => !c.component_code || !isFinite(c.amount))) {
@@ -300,10 +322,11 @@ export default function CompensationEditor() {
     try {
       const payload = {
         id: editing.id || undefined,
+        organization_id: organizationId,
         user_id: editing.user_id,
         effective_from: editing.effective_from,
         effective_to: editing.effective_to,
-        ctc_annual: Number(editing.ctc_annual),
+        ctc_annual: normalizedCtc,
         pay_schedule: editing.pay_schedule,
         currency: editing.currency,
         compensation_payload: editing.compensation_payload,
@@ -518,106 +541,164 @@ export default function CompensationEditor() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
-      <div className="bg-white rounded-lg border shadow-sm p-6">
-        <PageHeader title="Compensation Editor" subtitle="Effective-dated compensation with component-level breakdown" />
+      {/* Hero Header */}
+      <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-6 text-white shadow-lg">
+        <h1 className="text-2xl font-bold">Compensation Editor</h1>
+        <p className="text-blue-100 mt-1 text-sm">Effective-dated compensation with component-level breakdown</p>
+      </div>
 
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm">
         {/* Employee picker */}
-        <section className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Select employee</label>
-          <div className="flex gap-2">
-            <input
-              value={
-                selectedUser
-                  ? [selectedUser.name, selectedUser.email].filter(Boolean).join(" • ")
-                  : query
-              }
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setUserId("");
-              }}
-              onFocus={() => setQuery("")}
-              placeholder="Search by name / code / email"
-              className="w-96 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+        <section className="p-6 border-b border-gray-100">
+          <label className="block text-sm font-semibold text-gray-800 mb-2">Select employee</label>
+          <div className="flex gap-3 items-center">
+            <div className="relative flex-1 max-w-lg">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+              <input
+                value={
+                  selectedUser && !showDropdown
+                    ? [selectedUser.name, selectedUser.email].filter(Boolean).join(" — ")
+                    : query
+                }
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setUserId("");
+                  setShowDropdown(true);
+                }}
+                onFocus={() => {
+                  setShowDropdown(true);
+                  if (selectedUser) {
+                    setQuery("");
+                    setUserId("");
+                  }
+                }}
+                onBlur={() => {
+                  // Delay to allow click on dropdown items
+                  setTimeout(() => setShowDropdown(false), 200);
+                }}
+                placeholder="Search by name, email, or department…"
+                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm"
+              />
+            </div>
             <button
               onClick={beginCreate}
               disabled={!userId}
-              className="px-3 py-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-50"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm"
             >
-              + Add compensation
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+              Add compensation
             </button>
           </div>
-          {/* results */}
-          {query && (
-            <div className="mt-2 max-h-64 overflow-auto border rounded-md">
-              {userList.length === 0 ? (
-                <div className="px-3 py-2 text-sm text-gray-500">No results</div>
-              ) : (
-                userList.map((u) => (
-                  <button
-                    key={u.id}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                    onClick={() => {
-                      setUserId(u.id);
-                      setQuery("");
-                    }}
-                  >
-                    <div className="font-medium text-gray-900">{u.name || u.id}</div>
-                    <div className="text-xs text-gray-500">
-                      {[u.email, u.department].filter(Boolean).join(" • ")}
-                    </div>
-                  </button>
-                ))
-              )}
+
+          {/* Employee dropdown */}
+          {showDropdown && (
+            <div className="relative mt-2 max-w-lg">
+              <div className="absolute z-20 w-full max-h-72 overflow-auto bg-white border border-gray-200 rounded-xl shadow-lg">
+                {userList.length === 0 ? (
+                  <div className="px-4 py-3 text-sm text-gray-500">No employees found</div>
+                ) : (
+                  userList.map((u) => (
+                    <button
+                      key={u.id}
+                      className={`w-full text-left px-4 py-3 text-sm hover:bg-blue-50 transition-colors border-b border-gray-50 last:border-0 flex items-center gap-3 ${
+                        u.id === userId ? 'bg-blue-50 border-l-2 border-l-blue-500' : ''
+                      }`}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setUserId(u.id);
+                        setQuery("");
+                        setShowDropdown(false);
+                      }}
+                    >
+                      <div className="flex-shrink-0 w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-semibold text-xs">
+                        {(u.name || u.email || '?').charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-medium text-gray-900 truncate">{u.name || 'Unnamed'}</div>
+                        <div className="text-xs text-gray-500 truncate">
+                          {[u.email, u.department].filter(Boolean).join(' · ')}
+                        </div>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
           )}
         </section>
 
         <AsyncSection loading={loading} error={err}>
           {!userId ? (
-            <EmptyState title="No employee selected" description="Search and select an employee to view compensation." />
+            <div className="p-12 text-center">
+              <div className="mx-auto w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">No employee selected</h3>
+              <p className="text-sm text-gray-500 mt-1">Search and select an employee above to view their compensation.</p>
+            </div>
           ) : rows.length === 0 && !editing ? (
-            <EmptyState title="No compensation" description="Click “Add compensation” to create the first row." />
+            <div className="p-12 text-center">
+              <div className="mx-auto w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-8 h-8 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">No compensation records</h3>
+              <p className="text-sm text-gray-500 mt-1">Click &quot;Add compensation&quot; to create the first record for this employee.</p>
+            </div>
           ) : (
             <>
               {/* History list */}
               {rows.length > 0 && (
-                <section className="mb-6">
-                  <h3 className="text-base font-semibold text-gray-900 mb-2">Compensation history</h3>
-                  <div className="overflow-x-auto border rounded-lg">
+                <section className="p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-base font-semibold text-gray-900">Compensation History</h3>
+                      {selectedUser && (
+                        <p className="text-sm text-gray-500 mt-0.5">{selectedUser.name} &mdash; {rows.length} record{rows.length !== 1 ? 's' : ''}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto border border-gray-200 rounded-xl">
                     <table className="min-w-full text-sm">
-                      <thead className="bg-gray-50 text-gray-600">
+                      <thead className="bg-gray-50/80">
                         <tr>
-                          <th className="px-3 py-2 text-left">Effective From</th>
-                          <th className="px-3 py-2 text-left">Effective To</th>
-                          <th className="px-3 py-2 text-right">CTC (Annual)</th>
-                          <th className="px-3 py-2 text-left">Schedule</th>
-                          <th className="px-3 py-2 text-left">Currency</th>
-                          <th className="px-3 py-2 text-left">Components</th>
-                          <th className="px-3 py-2"></th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Effective From</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Effective To</th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">CTC (Annual)</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Schedule</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Components</th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y">
+                      <tbody className="divide-y divide-gray-100">
                         {rows.map((r) => (
-                          <tr key={r.id} className="hover:bg-gray-50">
-                            <td className="px-3 py-2">{r.effective_from}</td>
-                            <td className="px-3 py-2">{r.effective_to || "—"}</td>
-                            <td className="px-3 py-2 text-right">{fmtINR(r.ctc_annual)}</td>
-                            <td className="px-3 py-2">{r.pay_schedule}</td>
-                            <td className="px-3 py-2">{r.currency}</td>
-                            <td className="px-3 py-2">
-                              {(r.compensation_payload.components || []).slice(0, 3).map((c) => c.component_code).join(", ")}
-                              {(r.compensation_payload.components || []).length > 3 ? "…" : ""}
+                          <tr key={r.id} className="hover:bg-blue-50/40 transition-colors">
+                            <td className="px-4 py-3 font-medium text-gray-900">{r.effective_from}</td>
+                            <td className="px-4 py-3 text-gray-600">{r.effective_to || <span className="inline-block px-2 py-0.5 bg-green-50 text-green-700 text-xs rounded-full font-medium">Current</span>}</td>
+                            <td className="px-4 py-3 text-right font-semibold text-gray-900">{fmtINR(r.ctc_annual)}</td>
+                            <td className="px-4 py-3"><span className="inline-block px-2 py-0.5 bg-gray-100 text-gray-700 text-xs rounded-full capitalize">{r.pay_schedule}</span></td>
+                            <td className="px-4 py-3">
+                              <div className="flex flex-wrap gap-1">
+                                {(r.compensation_payload.components || []).slice(0, 4).map((c) => (
+                                  <span key={c.component_code} className="inline-block px-1.5 py-0.5 bg-blue-50 text-blue-700 text-xs rounded font-medium">{c.component_code}</span>
+                                ))}
+                                {(r.compensation_payload.components || []).length > 4 && (
+                                  <span className="inline-block px-1.5 py-0.5 bg-gray-100 text-gray-500 text-xs rounded">+{(r.compensation_payload.components || []).length - 4}</span>
+                                )}
+                              </div>
                             </td>
-                            <td className="px-3 py-2 text-right">
-                              <div className="flex gap-2 justify-end">
-                                <button className="px-2 py-1 rounded-md border bg-white hover:bg-gray-50" onClick={() => doPreview(r.id)}>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex gap-1.5 justify-end">
+                                <button className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors" onClick={() => doPreview(r.id)}>
                                   Preview
                                 </button>
-                                <button className="px-2 py-1 rounded-md border bg-white hover:bg-gray-50" onClick={() => beginEdit(r)}>
+                                <button className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors" onClick={() => beginEdit(r)}>
                                   Edit
                                 </button>
-                                <button className="px-2 py-1 rounded-md border bg-white hover:bg-gray-50" onClick={() => deleteRow(r.id)}>
+                                <button className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 transition-colors" onClick={() => deleteRow(r.id)}>
                                   Delete
                                 </button>
                               </div>
@@ -629,16 +710,16 @@ export default function CompensationEditor() {
                   </div>
 
                   {/* Preview controls */}
-                  <div className="mt-3 flex items-center gap-2">
-                    <label className="text-sm text-gray-700">Preview period:</label>
+                  <div className="mt-4 flex items-center gap-3 bg-gray-50 rounded-xl p-3">
+                    <label className="text-sm font-medium text-gray-700">Preview period:</label>
                     <select
                       value={previewMonth}
                       onChange={(e) => setPreviewMonth(Number(e.target.value))}
-                      className="px-2 py-1 border rounded"
+                      className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                     >
                       {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
                         <option key={m} value={m}>
-                          {m.toString().padStart(2, "0")}
+                          {new Date(2000, m - 1).toLocaleString('default', { month: 'short' })} ({m.toString().padStart(2, "0")})
                         </option>
                       ))}
                     </select>
@@ -646,20 +727,25 @@ export default function CompensationEditor() {
                       type="number"
                       value={previewYear}
                       onChange={(e) => setPreviewYear(Number(e.target.value))}
-                      className="w-24 px-2 py-1 border rounded"
+                      className="w-28 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                     />
-                    {previewBusy && <span className="text-sm text-gray-600">Calculating…</span>}
+                    {previewBusy && (
+                      <span className="text-sm text-blue-600 flex items-center gap-1">
+                        <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
+                        Calculating&hellip;
+                      </span>
+                    )}
                   </div>
 
                   {/* Preview pane */}
                   {preview && (
-                    <div className="mt-3 rounded-lg border bg-white p-4">
-                      <div className="text-sm text-gray-600 mb-2">
-                        Snapshot for {preview.month}/{preview.year}
+                    <div className="mt-4 rounded-xl border border-gray-200 bg-gradient-to-br from-white to-gray-50/50 p-5">
+                      <div className="text-sm font-medium text-gray-600 mb-3">
+                        Monthly snapshot for {new Date(2000, preview.month - 1).toLocaleString('default', { month: 'long' })} {preview.year}
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <SummaryCard
-                          title="Gross earnings"
+                          title="Gross Earnings"
                           value={fmtINR(preview.gross_earnings)}
                           items={preview.snapshot.filter((s) => s.type === "earning")}
                         />
@@ -668,16 +754,16 @@ export default function CompensationEditor() {
                           value={fmtINR(preview.total_deductions)}
                           items={preview.snapshot.filter((s) => s.type === "deduction")}
                         />
-                        <div className="rounded-lg border p-4">
-                          <div className="text-sm text-gray-500 mb-1">Totals</div>
-                          <ul className="text-sm text-gray-900 space-y-1">
-                            <li className="flex justify-between">
+                        <div className="rounded-xl border border-gray-200 p-4 bg-white">
+                          <div className="text-sm text-gray-500 mb-2 font-medium">Totals</div>
+                          <ul className="text-sm text-gray-900 space-y-2">
+                            <li className="flex justify-between items-center">
                               <span>Net Pay</span>
-                              <span className="font-semibold text-green-700">{fmtINR(preview.net_pay)}</span>
+                              <span className="font-bold text-green-700 text-lg">{fmtINR(preview.net_pay)}</span>
                             </li>
-                            <li className="flex justify-between">
+                            <li className="flex justify-between items-center pt-2 border-t border-gray-100">
                               <span>Employer Cost</span>
-                              <span>{fmtINR(preview.employer_cost)}</span>
+                              <span className="font-semibold text-gray-700">{fmtINR(preview.employer_cost)}</span>
                             </li>
                           </ul>
                         </div>
@@ -689,10 +775,11 @@ export default function CompensationEditor() {
 
               {/* Editor */}
               {editing && (
-                <section className="bg-white rounded-lg border p-6">
-                  <h3 className="text-base font-semibold text-gray-900 mb-4">
-                    {editing.id ? "Edit Compensation" : "Add Compensation"}
+                <section className="mx-6 mb-6 bg-white rounded-xl border border-blue-200 p-6 shadow-sm">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-1">
+                    {editing.id ? "Edit Compensation" : "New Compensation Record"}
                   </h3>
+                  <p className="text-sm text-gray-500 mb-5">Fill in the compensation details below</p>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <Field label="Effective From">
@@ -700,7 +787,7 @@ export default function CompensationEditor() {
                         type="date"
                         value={editing.effective_from}
                         onChange={(e) => setEditing((p) => p && { ...p, effective_from: e.target.value })}
-                        className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm"
                       />
                     </Field>
                     <Field label="Effective To (optional)">
@@ -710,14 +797,14 @@ export default function CompensationEditor() {
                         onChange={(e) =>
                           setEditing((p) => p && { ...p, effective_to: e.target.value ? e.target.value : null })
                         }
-                        className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm"
                       />
                     </Field>
                     <Field label="Currency">
                       <input
                         value={editing.currency}
                         onChange={(e) => setEditing((p) => p && { ...p, currency: e.target.value.toUpperCase() })}
-                        className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm"
                       />
                     </Field>
                     <Field label="Pay Schedule">
@@ -726,7 +813,7 @@ export default function CompensationEditor() {
                         onChange={(e) =>
                           setEditing((p) => p && { ...p, pay_schedule: e.target.value as CompensationRow["pay_schedule"] })
                         }
-                        className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm"
                       >
                         <option value="monthly">Monthly</option>
                         <option value="biweekly">Biweekly</option>
@@ -738,7 +825,7 @@ export default function CompensationEditor() {
                         type="number"
                         value={editing.ctc_annual}
                         onChange={(e) => setEditing((p) => p && { ...p, ctc_annual: Number(e.target.value) })}
-                        className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm"
                       />
                       <div className="text-xs text-gray-500 mt-1">
                         Approx per-period: <strong>{fmtINR(ctcMonthly)}</strong>
@@ -752,7 +839,7 @@ export default function CompensationEditor() {
                             p && { ...p, compensation_payload: { ...p.compensation_payload, notes: e.target.value } }
                           )
                         }
-                        className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm"
                       />
                     </Field>
                   </div>
@@ -760,15 +847,27 @@ export default function CompensationEditor() {
                   {/* AI Assistant */}
                   <div className="mt-6">
                     <CompensationChat
+                      currentCompensation={{
+                        ctc_annual: editing.ctc_annual || 0,
+                        pay_schedule: (editing.pay_schedule as "monthly" | "weekly" | "biweekly") || "monthly",
+                        currency: editing.currency || "INR",
+                        components: editing.compensation_payload?.components || [],
+                        notes: editing.compensation_payload?.notes || "",
+                      }}
                       availableComponents={components.map(c => ({
                         code: c.code,
                         name: c.name,
                         type: c.type
                       }))}
                       onCompensationUpdate={(compensation) => {
+                        const componentCtc = computeAnnualCtcFromComponents(compensation.components || []);
+                        const normalizedCtc = Number(compensation.ctc_annual) > 0
+                          ? Math.round(Number(compensation.ctc_annual))
+                          : componentCtc;
+
                         setEditing((p) => p && {
                           ...p,
-                          ctc_annual: compensation.ctc_annual,
+                          ctc_annual: normalizedCtc,
                           pay_schedule: compensation.pay_schedule,
                           currency: compensation.currency,
                           compensation_payload: {
@@ -787,41 +886,42 @@ export default function CompensationEditor() {
 
                   {/* Component lines */}
                   <div className="mt-6">
-                    <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center justify-between mb-3">
                       <div>
-                        <div className="text-sm font-medium text-gray-900">Component amounts</div>
-                        <div className="text-xs text-gray-600">
-                          Each line writes into <code>compensation_payload.components[]</code>.
+                        <div className="text-sm font-semibold text-gray-900">Salary Components</div>
+                        <div className="text-xs text-gray-500 mt-0.5">
+                          Define each earning, deduction and employer cost component
                         </div>
                       </div>
-                      <button onClick={addComponentLine} className="px-3 py-2 rounded-md border bg-white hover:bg-gray-50">
-                        + Add component
+                      <button onClick={addComponentLine} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                        Add component
                       </button>
                     </div>
 
-                    <div className="overflow-x-auto border rounded-lg">
+                    <div className="overflow-x-auto border border-gray-200 rounded-xl">
                       <table className="min-w-full text-sm">
-                        <thead className="bg-gray-50 text-gray-600">
+                        <thead className="bg-gray-50/80">
                           <tr>
-                            <th className="px-3 py-2 text-left">Component</th>
-                            <th className="px-3 py-2 text-right">Amount</th>
-                            <th className="px-3 py-2"></th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Component</th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Annual Amount</th>
+                            <th className="px-4 py-3 w-20"></th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y">
+                        <tbody className="divide-y divide-gray-100">
                           {(editing.compensation_payload.components || []).length === 0 && (
                             <tr>
-                              <td colSpan={3} className="px-6 py-6">
-                                <EmptyState
-                                  title="No lines"
-                                  description="Add components like BASIC, HRA, CONV, etc."
-                                />
+                              <td colSpan={3} className="px-6 py-8 text-center">
+                                <div className="text-gray-400 mb-1">No components added yet</div>
+                                <div className="text-xs text-gray-400">Add components like BASIC, HRA, CONV, PF, etc.</div>
                               </td>
                             </tr>
                           )}
-                          {(editing.compensation_payload.components || []).map((line, idx) => (
-                            <tr key={idx} className="hover:bg-gray-50">
-                              <td className="px-3 py-2">
+                          {(editing.compensation_payload.components || []).map((line, idx) => {
+                            const comp = components.find(c => c.code === line.component_code);
+                            return (
+                            <tr key={idx} className="hover:bg-blue-50/30 transition-colors">
+                              <td className="px-4 py-3">
                                 <select
                                   value={line.component_code}
                                   onChange={(e) => {
@@ -833,16 +933,28 @@ export default function CompensationEditor() {
                                       return { ...p, compensation_payload: { ...p.compensation_payload, components: next } };
                                     });
                                   }}
-                                  className="min-w-[260px] px-2 py-1 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  className={`min-w-[280px] px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white ${
+                                    comp?.type === 'earning' ? 'text-green-800' : comp?.type === 'deduction' ? 'text-red-800' : 'text-amber-800'
+                                  }`}
                                 >
-                                  {components.map((c) => (
-                                    <option key={c.code} value={c.code}>
-                                      {c.name} ({c.code})
-                                    </option>
-                                  ))}
+                                  <optgroup label="Earnings">
+                                    {components.filter(c => c.type === 'earning').map((c) => (
+                                      <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
+                                    ))}
+                                  </optgroup>
+                                  <optgroup label="Deductions">
+                                    {components.filter(c => c.type === 'deduction').map((c) => (
+                                      <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
+                                    ))}
+                                  </optgroup>
+                                  <optgroup label="Employer Costs">
+                                    {components.filter(c => c.type === 'employer_cost').map((c) => (
+                                      <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
+                                    ))}
+                                  </optgroup>
                                 </select>
                               </td>
-                              <td className="px-3 py-2 text-right">
+                              <td className="px-4 py-3 text-right">
                                 <input
                                   type="number"
                                   step={0.01}
@@ -856,42 +968,45 @@ export default function CompensationEditor() {
                                       return { ...p, compensation_payload: { ...p.compensation_payload, components: next } };
                                     });
                                   }}
-                                  className="w-40 text-right px-2 py-1 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  className="w-44 text-right px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                                 />
                               </td>
-                              <td className="px-3 py-2 text-right">
+                              <td className="px-4 py-3 text-center">
                                 <button
                                   onClick={() => removeComponentLine(idx)}
-                                  className="px-2 py-1 rounded-md border bg-white hover:bg-gray-50"
+                                  className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                                  title="Remove component"
                                 >
-                                  Remove
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                 </button>
                               </td>
                             </tr>
-                          ))}
+                            );
+                          })}
                         </tbody>
-                        {editing && (
-                          <tfoot>
+                        {editing && (editing.compensation_payload.components || []).length > 0 && (
+                          <tfoot className="bg-gray-50/80">
                             <tr>
-                              <td className="px-3 py-2 text-right font-medium">Total of lines</td>
-                              <td className="px-3 py-2 text-right font-medium">{fmtINR(totalComponentAmt)}</td>
+                              <td className="px-4 py-3 text-right font-semibold text-gray-700">Total annual</td>
+                              <td className="px-4 py-3 text-right font-bold text-gray-900 text-base">{fmtINR(totalComponentAmt)}</td>
                               <td></td>
                             </tr>
                           </tfoot>
                         )}
                       </table>
                     </div>
-                    <div className="text-xs text-gray-600 mt-2">
-                      Tip: Your payroll engine may also compute some components (e.g., PF) from these base amounts.
+                    <div className="text-xs text-gray-400 mt-2 flex items-center gap-1">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                      Payroll engine may also compute statutory components (e.g., PF) from these base amounts.
                     </div>
                   </div>
 
                   {/* Actions */}
-                  <div className="mt-6 flex justify-end gap-2">
-                    <button className="px-4 py-2 rounded-md border bg-white hover:bg-gray-50" onClick={() => setEditing(null)}>
+                  <div className="mt-6 flex justify-end gap-3 pt-5 border-t border-gray-100">
+                    <button className="px-5 py-2.5 rounded-xl border border-gray-300 bg-white hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors" onClick={() => setEditing(null)}>
                       Cancel
                     </button>
-                    <button className="px-4 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700" onClick={saveRow}>
+                    <button className="px-5 py-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-sm font-medium transition-colors shadow-sm" onClick={saveRow}>
                       Save compensation
                     </button>
                   </div>
@@ -909,7 +1024,7 @@ export default function CompensationEditor() {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      <label className="block text-sm font-semibold text-gray-700 mb-1.5">{label}</label>
       {children}
     </div>
   );
@@ -925,17 +1040,17 @@ function SummaryCard({
   items: { code: string; name: string; amount: number }[];
 }) {
   return (
-    <div className="rounded-lg border p-4">
-      <div className="text-sm text-gray-500">{title}</div>
-      <div className="text-xl font-semibold text-gray-900">{value}</div>
-      <ul className="mt-2 text-sm text-gray-800 space-y-1">
+    <div className="rounded-xl border border-gray-200 p-4 bg-white">
+      <div className="text-sm text-gray-500 font-medium">{title}</div>
+      <div className="text-xl font-bold text-gray-900 mt-1">{value}</div>
+      <ul className="mt-3 text-sm text-gray-800 space-y-1.5">
         {items.length === 0 ? (
-          <li className="text-gray-400">—</li>
+          <li className="text-gray-400">&mdash;</li>
         ) : (
           items.map((it) => (
-            <li key={it.code} className="flex justify-between">
-              <span>{it.name}</span>
-              <span className="font-medium">{fmtINR(it.amount)}</span>
+            <li key={it.code} className="flex justify-between items-center">
+              <span className="text-gray-600">{it.name}</span>
+              <span className="font-semibold">{fmtINR(it.amount)}</span>
             </li>
           ))
         )}

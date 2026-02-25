@@ -543,7 +543,7 @@ const EnhancedConversationDashboard: React.FC<EnhancedConversationDashboardProps
           <div className="bg-white rounded-lg shadow-sm p-6">
             <h3 className="text-lg font-medium mb-4 flex items-center gap-2">
               <HiLightBulb className="w-6 h-6 text-yellow-500" />
-              AI-Powered Insights
+              Insights
             </h3>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

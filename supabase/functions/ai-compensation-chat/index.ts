@@ -10,46 +10,130 @@ const corsHeaders = {
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" }
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
 
+function extractFirstBalancedJson(input: string): string | null {
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === "\"") {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === "{") {
+      if (start === -1) start = i;
+      depth++;
+    } else if (ch === "}") {
+      if (depth > 0) depth--;
+      if (start !== -1 && depth === 0) return input.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+type HaikuCallResult = { text: string; stopReason?: string };
+
+function computeAnnualCtcFromComponents(
+  components: Array<{ component_code: string; amount: number }> = [],
+): number {
+  return Math.round(
+    components.reduce((sum, line) => {
+      const amt = Number(line?.amount) || 0;
+      return amt > 0 ? sum + amt : sum;
+    }, 0),
+  );
+}
+
+async function callHaiku(system: string, userText: string, maxTokens = 1600): Promise<HaikuCallResult> {
+  const key = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
+  if (!key) throw new Error("Missing ANTHROPIC_API_KEY");
+
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": key,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-3-5-haiku-20241022",
+      temperature: 0.1,
+      max_tokens: maxTokens,
+      system,
+      messages: [{ role: "user", content: userText }],
+    }),
+  });
+
+  if (!resp.ok) {
+    throw new Error(`Anthropic API error ${resp.status}: ${await resp.text()}`);
+  }
+
+  const data = await resp.json();
+  const text = data?.content?.map((c: any) => c?.text ?? "").join("") ?? "";
+  return { text, stopReason: data?.stop_reason };
+}
+
 serve(async (req) => {
+  const reqId = crypto.randomUUID();
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405);
 
   try {
     const body = await req.json();
     const { user_input = "", current_compensation, conversation_history = [] } = body || {};
+    console.log(`[ai-comp-chat][${reqId}] request received`, {
+      user_input_len: String(user_input || "").length,
+      has_current_compensation: !!current_compensation,
+      history_len: Array.isArray(conversation_history) ? conversation_history.length : 0,
+    });
 
-    // Initialize Supabase client
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch active pay components
     const { data: components, error: compError } = await supabase
-      .from('pay_components')
-      .select('code, name, type')
-      .eq('active', true);
+      .from("pay_components")
+      .select("code, name, type")
+      .eq("active", true);
 
     if (compError) {
-      console.error("Error fetching components:", compError);
+      console.error(`[ai-comp-chat][${reqId}] error fetching components`, compError);
       return jsonResponse({ error: "Failed to fetch pay components" }, 500);
     }
 
-    // Categorize components for the prompt
-    const earnings = components?.filter(c => c.type === 'earning').map(c => `${c.code} (${c.name})`).join(', ') || "BASIC, HRA, CONV, SPEC";
-    const deductions = components?.filter(c => c.type === 'deduction').map(c => `${c.code} (${c.name})`).join(', ') || "PF, ESI, PT, TDS";
-    const employerCosts = components?.filter(c => c.type === 'employer_cost').map(c => `${c.code} (${c.name})`).join(', ') || "PF_ER, ESI_ER";
+    const earnings =
+      components?.filter((c) => c.type === "earning").map((c) => `${c.code} (${c.name})`).join(", ") ||
+      "BASIC, HRA, CONV, SPEC";
+    const deductions =
+      components?.filter((c) => c.type === "deduction").map((c) => `${c.code} (${c.name})`).join(", ") ||
+      "PF_EE, PT, TDS";
+    const employerCosts =
+      components?.filter((c) => c.type === "employer_cost").map((c) => `${c.code} (${c.name})`).join(", ") ||
+      "PF_ER, ESI_ER";
 
-    const CHAT_PROMPT = `You are an Indian payroll assistant.
-- Talk conversationally.
-- When you propose a salary breakup, return JSON in this shape (all ANNUAL amounts):
+    const systemPrompt = `You are an Indian payroll assistant.
+Return VALID JSON only. No markdown fences.
+
+Output schema:
 {
   "compensation": {
     "ctc_annual": number,
-    "pay_schedule": "monthly",
+    "pay_schedule": "monthly" | "weekly" | "biweekly",
     "currency": "INR",
     "components": [{"component_code": string, "amount": number}],
     "notes": string
@@ -58,72 +142,115 @@ serve(async (req) => {
   "conversation_complete": boolean,
   "next_questions": string[]
 }
-- It's OK to iterate loosely; don't worry about company-specific codes. Keep amounts annual.
 
-CRITICAL RULES FOR COMPONENTS:
-1. Use ONLY these available component codes:
-   - EARNINGS: ${earnings}
-   - DEDUCTIONS: ${deductions}
-   - EMPLOYER COSTS: ${employerCosts}
+Rules:
+- Use ONLY component codes from provided lists.
+- Earnings must be positive.
+- Deductions must be negative.
+- Employer costs must be positive.
+- Keep all amounts annual.`;
 
-2. SIGN CONVENTION (STRICTLY ENFORCE THIS):
-   - EARNINGS must be POSITIVE numbers (e.g., 360000).
-   - DEDUCTIONS must be NEGATIVE numbers (e.g., -2400).
-   - EMPLOYER COSTS must be POSITIVE numbers (e.g., 21600).
-
-3. LOGIC:
-   - Employee PF (12% of basic) + Employer PF (12% of basic) are both required.
-   - Employee ESI (0.75% of wages) + Employer ESI (3.25% of wages) are both required for applicable employees (Gross < 21000/month).
-   - Professional Tax (PT) varies by state (usually 200/month).
-   - TDS is an estimate.
-`;
-
-    const key = Deno.env.get("ALLGOOGLE_KEY");
-    if (!key) return jsonResponse({ error: "Missing ALLGOOGLE_KEY" }, 500);
-
-    const prompt = `${CHAT_PROMPT}
+    const userPrompt = `AVAILABLE CODES
+EARNINGS: ${earnings}
+DEDUCTIONS: ${deductions}
+EMPLOYER COSTS: ${employerCosts}
 
 CURRENT_COMP: ${JSON.stringify(current_compensation || {}, null, 2)}
 
-HISTORY: ${conversation_history.map((m: any) => `
-${m.role}: ${m.content}`).join("")}
+HISTORY:
+${conversation_history.map((m: any) => `${m.role}: ${m.content}`).join("\n")}
 
 USER: ${user_input}
 
-Reply with JSON only (no markdown fences).`;
+Return only one valid JSON object.`;
 
-    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${key}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.5, maxOutputTokens: 1400 }
-      }),
+    const first = await callHaiku(systemPrompt, userPrompt, 1700);
+    let text = first.text.trim();
+    console.log(`[ai-comp-chat][${reqId}] model response #1`, {
+      text_len: text.length,
+      stop_reason: first.stopReason,
+      text_head: text.slice(0, 180),
     });
-
-    if (!resp.ok) return jsonResponse({ error: `Gemini API error ${resp.status}` }, 500);
-
-    const data = await resp.json();
-    const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-
-    // If it returned markdown fences, strip them; then pass through as-is
-    const fenced = text.match(/```json\n?([\s\S]*?)\n?```/i) || text.match(/```\n?([\s\S]*?)\n?```/i);
-    const raw = (fenced ? fenced[1] : text).trim();
 
     let parsed: any;
     try {
-      parsed = JSON.parse(raw);
+      parsed = JSON.parse(text);
+      console.log(`[ai-comp-chat][${reqId}] parse success #1 direct`);
     } catch {
-      return jsonResponse({
-        explanation: text,
-        compensation: null,
-        conversation_complete: false,
-        next_questions: []
-      });
+      console.log(`[ai-comp-chat][${reqId}] parse failed #1 direct`);
+      try {
+        const candidate = extractFirstBalancedJson(text);
+        if (!candidate) throw new Error("No balanced JSON found in response #1");
+        parsed = JSON.parse(candidate);
+        console.log(`[ai-comp-chat][${reqId}] parse success #1 balanced`, {
+          candidate_len: candidate.length,
+        });
+      } catch {
+        console.log(`[ai-comp-chat][${reqId}] parse failed #1 balanced, retrying`);
+        const repairUserPrompt = `${userPrompt}
+
+IMPORTANT: Previous output was invalid or truncated.
+Return ONLY one complete JSON object matching the schema exactly.`;
+
+        const second = await callHaiku(systemPrompt, repairUserPrompt, 1700);
+        text = second.text.trim();
+        console.log(`[ai-comp-chat][${reqId}] model response #2`, {
+          text_len: text.length,
+          stop_reason: second.stopReason,
+          text_head: text.slice(0, 180),
+        });
+
+        try {
+          parsed = JSON.parse(text);
+          console.log(`[ai-comp-chat][${reqId}] parse success #2 direct`);
+        } catch {
+          const candidate2 = extractFirstBalancedJson(text);
+          if (!candidate2) {
+            console.error(`[ai-comp-chat][${reqId}] all parse attempts failed`);
+            return jsonResponse(
+              {
+                error: "Model returned invalid/truncated JSON twice",
+                raw_preview: text.slice(0, 220),
+              },
+              502,
+            );
+          }
+          parsed = JSON.parse(candidate2);
+          console.log(`[ai-comp-chat][${reqId}] parse success #2 balanced`, {
+            candidate_len: candidate2.length,
+          });
+        }
+      }
     }
 
-    return jsonResponse(parsed);
+    if (!parsed?.compensation) {
+      console.error(`[ai-comp-chat][${reqId}] parsed JSON missing compensation`);
+      return jsonResponse(
+        {
+          error: "Model JSON missing compensation field",
+          parsed_preview: JSON.stringify(parsed).slice(0, 220),
+        },
+        502,
+      );
+    }
+
+    const normalizedCompensation = {
+      ...parsed.compensation,
+      ctc_annual:
+        Number(parsed?.compensation?.ctc_annual) > 0
+          ? Math.round(Number(parsed.compensation.ctc_annual))
+          : computeAnnualCtcFromComponents(parsed?.compensation?.components || []),
+    };
+
+    console.log(`[ai-comp-chat][${reqId}] returning response`, {
+      has_compensation: !!parsed?.compensation,
+      component_count: Array.isArray(parsed?.compensation?.components) ? parsed.compensation.components.length : 0,
+      conversation_complete: !!parsed?.conversation_complete,
+      ctc_annual: normalizedCompensation.ctc_annual,
+    });
+    return jsonResponse({ ...parsed, compensation: normalizedCompensation });
   } catch (e: any) {
+    console.error(`[ai-comp-chat][${reqId}] unhandled error`, e?.message || e);
     return jsonResponse({ error: e?.message || "Internal error" }, 500);
   }
 });

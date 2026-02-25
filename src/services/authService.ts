@@ -197,6 +197,7 @@ export async function getOrganizationUsers(organizationId: string): Promise<User
       .from('users')
       .select('*')
       .eq('organization_id', organizationId)
+      .neq('is_active', false)
       .order('created_at', { ascending: false });
 
     if (error) {

@@ -10,6 +10,8 @@ import ReviewValidate from "./AttendanceImportWizard/ReviewValidate";
 import ApplyOverrides from "./AttendanceImportWizard/ApplyOverrides";
 import CompensationEditor from "./CompensationEditor";
 import PayrollPreview from "./PayrollPreview";
+import AIAttendanceConfigurator from "../components/hr/AIAttendanceConfigurator";
+import AIAttendanceReviewQueue from "../components/hr/AIAttendanceReviewQueue";
 
 /** =======================
  *  Context
@@ -23,10 +25,14 @@ export type PayrollCtx = {
   setYear: (y: number) => void;
 };
 
+const DEFAULT_DATE = new Date();
+const DEFAULT_MONTH = DEFAULT_DATE.getMonth() + 1;
+const DEFAULT_YEAR = DEFAULT_DATE.getFullYear();
+
 export const PayrollContext = createContext<PayrollCtx>({
   orgId: "",
-  month: 9,
-  year: 2025,
+  month: DEFAULT_MONTH,
+  year: DEFAULT_YEAR,
   setOrgId: () => { },
   setMonth: () => { },
   setYear: () => { },
@@ -43,6 +49,13 @@ function useQueryParams() {
 function stripToInt(v: any, fallback: number) {
   const n = Number(v);
   return Number.isFinite(n) ? Math.max(1, Math.floor(n)) : fallback;
+}
+
+function clampYear(v: any, fallback: number) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  const year = Math.floor(n);
+  return year >= 2000 && year <= 2100 ? year : fallback;
 }
 
 /** =======================
@@ -87,6 +100,28 @@ function MonthSelector({ month, setMonth }: { month: number; setMonth: (m: numbe
   );
 }
 
+function YearSelector({ year, setYear }: { year: number; setYear: (y: number) => void }) {
+  const years: number[] = [];
+  const startYear = DEFAULT_YEAR - 5;
+  const endYear = DEFAULT_YEAR + 5;
+
+  for (let y = startYear; y <= endYear; y += 1) {
+    years.push(y);
+  }
+
+  return (
+    <select
+      value={year}
+      onChange={(e) => setYear(Number(e.target.value))}
+      className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+    >
+      {years.map((y) => (
+        <option key={y} value={y}>{y}</option>
+      ))}
+    </select>
+  );
+}
+
 /** =======================
  *  Shell Layout
  *  ======================= */
@@ -96,15 +131,15 @@ function InnerShell() {
   const { organizationId } = useOrganization();
 
   // State
-  const initialMonth = stripToInt(params.get("month"), 9);
-  const initialYear = 2025;
+  const initialMonth = stripToInt(params.get("month"), DEFAULT_MONTH);
+  const initialYear = clampYear(params.get("year"), DEFAULT_YEAR);
   const [month, setMonth] = useState(initialMonth);
   const [year, setYear] = useState(initialYear);
 
   // Sync URL
   useEffect(() => {
-    const currentMonth = stripToInt(params.get("month"), 9);
-    const currentYear = 2025;
+    const currentMonth = stripToInt(params.get("month"), DEFAULT_MONTH);
+    const currentYear = clampYear(params.get("year"), DEFAULT_YEAR);
 
     if (month !== currentMonth || year !== currentYear) {
       const newParams = new URLSearchParams();
@@ -138,17 +173,19 @@ function InnerShell() {
                   <NavTab to="/payroll" label="Dashboard" />
                   <NavTab to="/payroll/period-board" label="Run Payroll" />
                   <NavTab to="/payroll/compensation" label="Compensation" />
+                  <NavTab to="/payroll/attendance-intelligence" label="Attendance AI" />
+                  <NavTab to="/payroll/ai-review" label="AI Review" />
                   <NavTab to="/payroll/statutory" label="Statutory" />
                   <NavTab to="/payroll/settings" label="Settings" />
                 </nav>
               </div>
 
               <div className="flex items-center gap-3">
-                <div className="w-40">
+                <div className="w-44">
                   <MonthSelector month={month} setMonth={setMonth} />
                 </div>
-                <div className="text-sm font-medium text-gray-500 bg-gray-100 px-3 py-2 rounded-md">
-                  {year}
+                <div className="w-32">
+                  <YearSelector year={year} setYear={setYear} />
                 </div>
               </div>
             </div>
@@ -183,6 +220,8 @@ function InnerShell() {
             <Route path="/import/review" element={<ReviewValidate />} />
             <Route path="/import/overrides" element={<ApplyOverrides />} />
             <Route path="/compensation" element={<CompensationEditor />} />
+            <Route path="/attendance-intelligence" element={<AIAttendanceConfigurator />} />
+            <Route path="/ai-review" element={<AIAttendanceReviewQueue />} />
             <Route path="*" element={<PayrollAdminHome />} />
           </Routes>
         </main>

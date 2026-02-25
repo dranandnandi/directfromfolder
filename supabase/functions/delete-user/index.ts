@@ -89,37 +89,38 @@ serve(async (req) => {
       throw new Error('Cannot delete your own account');
     }
 
-    console.log('Deleting user profile:', userId);
+    console.log('Deactivating user profile:', userId);
 
-    // Step 1: Delete from public.users
-    const { error: deleteProfileError } = await supabaseAdmin
+    // Step 1: Soft delete — set is_active = false (preserves FK references)
+    const { error: deactivateError } = await supabaseAdmin
       .from('users')
-      .delete()
+      .update({ is_active: false })
       .eq('id', userId);
 
-    if (deleteProfileError) {
-      throw new Error(`Failed to delete user profile: ${deleteProfileError.message}`);
+    if (deactivateError) {
+      throw new Error(`Failed to deactivate user profile: ${deactivateError.message}`);
     }
 
-    console.log('User profile deleted successfully');
+    console.log('User profile deactivated successfully');
 
-    // Step 2: Delete from auth.users (optional - cascade might handle this)
+    // Step 2: Disable auth login so user can't sign in anymore
     if (targetUser.auth_id) {
-      console.log('Deleting auth user:', targetUser.auth_id);
+      console.log('Disabling auth user:', targetUser.auth_id);
       try {
-        const { error: deleteAuthError } = await supabaseAdmin.auth.admin.deleteUser(
-          targetUser.auth_id
+        const { error: banError } = await supabaseAdmin.auth.admin.updateUserById(
+          targetUser.auth_id,
+          { ban_duration: '876600h' } // ~100 years = effectively permanent
         );
         
-        if (deleteAuthError) {
-          console.error('Failed to delete auth user:', deleteAuthError);
-          // Don't throw - profile deletion succeeded
+        if (banError) {
+          console.error('Failed to ban auth user:', banError);
+          // Don't throw - profile deactivation succeeded
         } else {
-          console.log('Auth user deleted successfully');
+          console.log('Auth user banned successfully');
         }
-      } catch (authDeleteError) {
-        console.error('Exception deleting auth user:', authDeleteError);
-        // Don't throw - profile deletion succeeded
+      } catch (authBanError) {
+        console.error('Exception banning auth user:', authBanError);
+        // Don't throw - profile deactivation succeeded
       }
     }
 
@@ -127,7 +128,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
-        message: 'User deleted successfully'
+        message: 'User deactivated successfully'
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

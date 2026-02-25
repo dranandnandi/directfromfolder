@@ -79,7 +79,7 @@ serve(async (req) => {
         .from('tasks')
         .select('*')
         .eq('organization_id', organizationId)
-        .or(`assignee_id.eq.${userId},created_by.eq.${userId}`)
+        .or(`assigned_to.eq.${userId},created_by.eq.${userId}`)
         .ilike('title', `%${searchTerm}%`)
         .order('created_at', { ascending: false })
         .limit(1)
@@ -94,7 +94,7 @@ serve(async (req) => {
     }
 
     // Check permission
-    if (task.assignee_id !== userId && task.created_by !== userId) {
+    if (task.assigned_to !== userId && task.created_by !== userId) {
       return new Response(
         JSON.stringify({ success: false, error: 'You can only update tasks assigned to you or created by you' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403 }
