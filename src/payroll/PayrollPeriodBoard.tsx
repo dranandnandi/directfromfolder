@@ -169,6 +169,15 @@ export default function PayrollPeriodBoard() {
                 cell: (r) => <span className="text-red-600">{money(r.total_deductions)}</span>
               },
               {
+                header: "Without Deduction",
+                align: "right",
+                cell: (r) => (
+                  <span className="font-medium text-blue-700" title="Net pay if no deductions applied">
+                    {money(r.gross_earnings)}
+                  </span>
+                )
+              },
+              {
                 header: "Net Pay",
                 align: "right",
                 cell: (r) => <span className="font-bold text-gray-900">{money(r.net_pay)}</span>
