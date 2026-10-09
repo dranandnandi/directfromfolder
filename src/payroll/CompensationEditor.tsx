@@ -47,6 +47,8 @@ type PreviewResponse = {
   employer_cost: number;
 };
 
+type CompensationComponentLine = { component_code: string; amount: number };
+
 
 
 /** ============== Utilities ============== */
@@ -62,6 +64,74 @@ function computeAnnualCtcFromComponents(components: { component_code: string; am
       return amt > 0 ? sum + amt : sum;
     }, 0),
   );
+}
+
+function findCanonicalComponent(code: string, components: PayComponent[]) {
+  const raw = String(code || "").trim();
+  if (!raw) return null;
+
+  const exact = components.find((c) => c.code === raw);
+  if (exact) return exact;
+
+  const caseMatch = components.find((c) => c.code.toLowerCase() === raw.toLowerCase());
+  if (caseMatch) return caseMatch;
+
+  const aliasCandidates: Record<string, string[]> = {
+    basic: ["BASIC", "basic"],
+    hra: ["HRA", "hra"],
+    conv: ["CONV", "conv", "conveyance"],
+    conveyance: ["CONV", "conv", "conveyance"],
+    special: ["SPEC", "special", "SPECIAL"],
+    spec: ["SPEC", "special", "SPECIAL"],
+    med: ["MED", "medical", "MEDICAL"],
+    medical: ["MED", "medical", "MEDICAL"],
+    pf: ["PF_EE", "PF", "pf_employee"],
+    pf_ee: ["PF_EE", "PF", "pf_employee"],
+    pf_employee: ["PF_EE", "PF", "pf_employee"],
+    esi: ["ESI", "ESIC_EE", "esic_employee"],
+    esic: ["ESI", "ESIC_EE", "esic_employee"],
+    esic_employee: ["ESI", "ESIC_EE", "esic_employee"],
+    pt: ["PT", "pt"],
+    tds: ["TDS", "tds"],
+    pf_er: ["PF_ER", "pf_employer"],
+    pf_employer: ["PF_ER", "pf_employer"],
+    esi_er: ["ESI_ER", "ESIC_ER", "esi_employer", "esic_employer"],
+    esic_er: ["ESI_ER", "ESIC_ER", "esi_employer", "esic_employer"],
+    esi_employer: ["ESI_ER", "ESIC_ER", "esi_employer", "esic_employer"],
+    esic_employer: ["ESI_ER", "ESIC_ER", "esi_employer", "esic_employer"],
+  };
+
+  const candidates = aliasCandidates[raw.toLowerCase()] || [];
+  return candidates
+    .map((candidate) => components.find((c) => c.code === candidate))
+    .find(Boolean) || null;
+}
+
+function normalizeComponentLines(lines: CompensationComponentLine[] = [], components: PayComponent[]) {
+  const totals = new Map<string, number>();
+  const unmapped: CompensationComponentLine[] = [];
+
+  for (const line of lines) {
+    const matched = findCanonicalComponent(line.component_code, components);
+    if (!matched) {
+      if (line.component_code) unmapped.push(line);
+      continue;
+    }
+
+    let amount = Number(line.amount) || 0;
+    if (matched.type === "deduction" && amount > 0) amount = -amount;
+    if (matched.type !== "deduction" && amount < 0) amount = Math.abs(amount);
+
+    totals.set(matched.code, (totals.get(matched.code) || 0) + amount);
+  }
+
+  return {
+    components: Array.from(totals.entries()).map(([component_code, amount]) => ({
+      component_code,
+      amount: Math.round((amount + Number.EPSILON) * 100) / 100,
+    })),
+    unmapped,
+  };
 }
 
 /** ============== Component ============== */
@@ -207,82 +277,12 @@ export default function CompensationEditor() {
   function beginEdit(r: CompensationRow) {
     const editData = JSON.parse(JSON.stringify(r));
     
-    // Fix component code mismatches by mapping to available codes
     if (editData.compensation_payload?.components) {
-      const availableCodes = components.map(c => c.code);
-      
-      // Create a mapping from saved codes to available codes
-      const codeMapping: Record<string, string> = {};
-      availableCodes.forEach(code => {
-        codeMapping[code] = code; // exact match
-        codeMapping[code.toLowerCase()] = code; // lowercase to exact
-        codeMapping[code.toUpperCase()] = code; // uppercase to exact
-      });
-      
-      // Common aliases mapping
-      const aliases: Record<string, string> = {
-        'basic': 'BASIC',
-        'BASIC': 'BASIC', 
-        'hra': 'HRA',
-        'HRA': 'HRA',
-        'conveyance': 'CONV',
-        'CONV': 'CONV',
-        'conv': 'CONV',
-        'special': 'SPEC',
-        'SPEC': 'SPEC',
-        'spec': 'SPEC',
-        'MED': 'MED',
-        'medical': 'MED',
-        'med': 'MED',
-        'PF_EE': 'PF',
-        'pf_employee': 'PF',
-        'PF': 'PF',
-        'pf': 'PF',
-        'PT': 'PT',
-        'pt': 'PT',
-        'TDS': 'TDS',
-        'tds': 'TDS',
-        'esic_employee': 'ESI',
-        'ESI': 'ESI',
-        'esi': 'ESI',
-        'ESIC': 'ESI',
-        // Employer contributions
-        'PF_ER': 'PF_ER',
-        'pf_er': 'PF_ER',
-        'pf_employer': 'PF_ER',
-        'ESI_ER': 'ESI_ER',
-        'esi_er': 'ESI_ER',
-        'esic_er': 'ESI_ER',
-        'esi_employer': 'ESI_ER',
-        'esic_employer': 'ESI_ER'
-      };
-      
-      // Apply mappings to find the best match
-      editData.compensation_payload.components = editData.compensation_payload.components.map((comp: any) => {
-        let mappedCode = comp.component_code;
-        
-        // Try direct mapping first
-        if (codeMapping[comp.component_code]) {
-          mappedCode = codeMapping[comp.component_code];
-        }
-        // Try alias mapping
-        else if (aliases[comp.component_code] && availableCodes.includes(aliases[comp.component_code])) {
-          mappedCode = aliases[comp.component_code];
-        }
-        // Try to find a case-insensitive match
-        else {
-          const match = availableCodes.find(code => 
-            code.toLowerCase() === comp.component_code.toLowerCase()
-          );
-          if (match) mappedCode = match;
-        }
-        
-        if (mappedCode !== comp.component_code) {
-          console.log(`Mapped component code: ${comp.component_code} → ${mappedCode}`);
-        }
-        
-        return { ...comp, component_code: mappedCode };
-      });
+      const normalized = normalizeComponentLines(editData.compensation_payload.components, components);
+      editData.compensation_payload.components = normalized.components;
+      if (normalized.unmapped.length > 0) {
+        console.warn("Skipped unavailable compensation components:", normalized.unmapped);
+      }
     }
     
     setEditing(editData);
@@ -306,14 +306,30 @@ export default function CompensationEditor() {
         }
       }
     }
-    const componentCtc = computeAnnualCtcFromComponents(editing.compensation_payload?.components || []);
+    const normalizedLines = normalizeComponentLines(editing.compensation_payload?.components || [], components);
+    if (normalizedLines.unmapped.length > 0) {
+      return alert(
+        "Some components are inactive or not configured and cannot be saved: " +
+          normalizedLines.unmapped.map((c) => c.component_code).join(", "),
+      );
+    }
+    if (normalizedLines.components.length === 0) {
+      return alert("Add at least one active salary component before saving.");
+    }
+
+    const normalizedPayload = {
+      ...editing.compensation_payload,
+      components: normalizedLines.components,
+    };
+
+    const componentCtc = computeAnnualCtcFromComponents(normalizedLines.components);
     const normalizedCtc = Number(editing.ctc_annual) > 0 ? Math.round(Number(editing.ctc_annual)) : componentCtc;
 
     // Basic sanity
     if (!normalizedCtc || normalizedCtc <= 0) {
       return alert("CTC (annual) must be a positive number.");
     }
-    if ((editing.compensation_payload?.components || []).some((c) => !c.component_code || !isFinite(c.amount))) {
+    if (normalizedLines.components.some((c) => !c.component_code || !isFinite(c.amount))) {
       return alert("Each component must have a code and numeric amount.");
     }
 
@@ -329,7 +345,7 @@ export default function CompensationEditor() {
         ctc_annual: normalizedCtc,
         pay_schedule: editing.pay_schedule,
         currency: editing.currency,
-        compensation_payload: editing.compensation_payload,
+        compensation_payload: normalizedPayload,
       };
       
       // Upsert compensation record directly to Supabase
@@ -407,54 +423,17 @@ export default function CompensationEditor() {
 
       console.log('Preview - Original compensation components:', compensationRow.compensation_payload.components);
 
-      // Apply same component code mapping logic as beginEdit function
-      const savedComponents = compensationRow.compensation_payload.components || [];
+      const savedComponents = normalizeComponentLines(
+        compensationRow.compensation_payload.components || [],
+        components,
+      ).components;
       const previewSnapshot: { code: string; name: string; type: 'earning' | 'deduction' | 'employer_cost'; amount: number }[] = [];
 
       for (const savedComp of savedComponents) {
         const savedCode = savedComp.component_code?.trim();
         if (!savedCode) continue;
 
-        // Try to map component code using same logic as beginEdit
-        let matchedComponent = null;
-
-        // 1. Exact match first
-        matchedComponent = components.find(c => c.code === savedCode);
-
-        // 2. Case-insensitive match
-        if (!matchedComponent) {
-          matchedComponent = components.find(c => c.code.toLowerCase() === savedCode.toLowerCase());
-        }
-
-        // 3. Common alias mapping
-        if (!matchedComponent) {
-          const aliasMap: Record<string, string> = {
-            'basic': 'BASIC',
-            'hra': 'HRA', 
-            'conv': 'CONV',
-            'conveyance': 'CONV',
-            'special': 'SPEC',
-            'spec': 'SPEC',
-            'medical': 'MED',
-            'med': 'MED',
-            'pf': 'PF',
-            'esi': 'ESI',
-            'pt': 'PT',
-            'tds': 'TDS',
-            // Employer contributions
-            'pf_er': 'PF_ER',
-            'pf_employer': 'PF_ER',
-            'esi_er': 'ESI_ER', 
-            'esic_er': 'ESI_ER',
-            'esi_employer': 'ESI_ER',
-            'esic_employer': 'ESI_ER'
-          };
-          
-          const normalizedAlias = aliasMap[savedCode.toLowerCase()];
-          if (normalizedAlias) {
-            matchedComponent = components.find(c => c.code === normalizedAlias);
-          }
-        }
+        const matchedComponent = findCanonicalComponent(savedCode, components);
 
         if (matchedComponent) {
           // Convert annual amount to monthly for preview display
@@ -502,8 +481,10 @@ export default function CompensationEditor() {
 
   function addComponentLine() {
     if (!editing) return;
-    // pick first earning by default
-    const first = components.find((c) => c.type === "earning") || components[0];
+    const selected = new Set((editing.compensation_payload.components || []).map((c) => c.component_code));
+    const first =
+      components.find((c) => c.type === "earning" && !selected.has(c.code)) ||
+      components.find((c) => !selected.has(c.code));
     if (!first) return alert("No pay components configured.");
     setEditing((prev) =>
       prev
@@ -860,7 +841,14 @@ export default function CompensationEditor() {
                         type: c.type
                       }))}
                       onCompensationUpdate={(compensation) => {
-                        const componentCtc = computeAnnualCtcFromComponents(compensation.components || []);
+                        const normalized = normalizeComponentLines(compensation.components || [], components);
+                        if (normalized.unmapped.length > 0) {
+                          alert(
+                            "AI suggested components that are not active/configured and were skipped: " +
+                              normalized.unmapped.map((c) => c.component_code).join(", "),
+                          );
+                        }
+                        const componentCtc = computeAnnualCtcFromComponents(normalized.components);
                         const normalizedCtc = Number(compensation.ctc_annual) > 0
                           ? Math.round(Number(compensation.ctc_annual))
                           : componentCtc;
@@ -872,7 +860,7 @@ export default function CompensationEditor() {
                           currency: compensation.currency,
                           compensation_payload: {
                             ...p.compensation_payload,
-                            components: compensation.components,
+                            components: normalized.components,
                             notes: compensation.notes
                           }
                         });
@@ -919,6 +907,11 @@ export default function CompensationEditor() {
                           )}
                           {(editing.compensation_payload.components || []).map((line, idx) => {
                             const comp = components.find(c => c.code === line.component_code);
+                            const selectedByOtherRows = new Set(
+                              (editing.compensation_payload.components || [])
+                                .filter((_, i) => i !== idx)
+                                .map((c) => c.component_code),
+                            );
                             return (
                             <tr key={idx} className="hover:bg-blue-50/30 transition-colors">
                               <td className="px-4 py-3">
@@ -939,17 +932,23 @@ export default function CompensationEditor() {
                                 >
                                   <optgroup label="Earnings">
                                     {components.filter(c => c.type === 'earning').map((c) => (
-                                      <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
+                                      <option key={c.code} value={c.code} disabled={selectedByOtherRows.has(c.code)}>
+                                        {c.name} ({c.code}){selectedByOtherRows.has(c.code) ? " - already selected" : ""}
+                                      </option>
                                     ))}
                                   </optgroup>
                                   <optgroup label="Deductions">
                                     {components.filter(c => c.type === 'deduction').map((c) => (
-                                      <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
+                                      <option key={c.code} value={c.code} disabled={selectedByOtherRows.has(c.code)}>
+                                        {c.name} ({c.code}){selectedByOtherRows.has(c.code) ? " - already selected" : ""}
+                                      </option>
                                     ))}
                                   </optgroup>
                                   <optgroup label="Employer Costs">
                                     {components.filter(c => c.type === 'employer_cost').map((c) => (
-                                      <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
+                                      <option key={c.code} value={c.code} disabled={selectedByOtherRows.has(c.code)}>
+                                        {c.name} ({c.code}){selectedByOtherRows.has(c.code) ? " - already selected" : ""}
+                                      </option>
                                     ))}
                                   </optgroup>
                                 </select>

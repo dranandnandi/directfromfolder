@@ -599,7 +599,7 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                       </div>
                       {task.patientId && (
                         <div>
-                          <span className="text-sm text-gray-500">Patient ID: </span>
+                          <span className="text-sm text-gray-500">Reference ID: </span>
                           <span className="text-sm">{task.patientId}</span>
                         </div>
                       )}
@@ -610,13 +610,13 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                   <div>
                     <h4 className="font-medium mb-2">Additional Information</h4>
                     <div className="space-y-2">
-                      {task.type === TaskType.PatientTracking && task.location && (
+                      {task.type === TaskType.ClientTracking && task.location && (
                         <div>
                           <span className="text-sm text-gray-500">Location: </span>
                           <span className="text-sm">{task.location}</span>
                         </div>
                       )}
-                      {task.type === TaskType.PatientTracking && task.hoursToComplete && (
+                      {task.type === TaskType.ClientTracking && task.hoursToComplete && (
                         <div>
                           <span className="text-sm text-gray-500">Complete within: </span>
                           <span className="text-sm">{task.hoursToComplete} hours</span>

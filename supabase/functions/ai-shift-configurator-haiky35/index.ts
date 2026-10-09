@@ -160,7 +160,7 @@ Deno.serve(async (req) => {
         status: "draft",
         instruction_text: input.instruction_text,
         instruction_json: instructionJson,
-        model_name: modelPreference === "haiku" ? "claude-3.5-haiku" : "gemini-2.5-flash",
+        model_name: modelPreference === "haiku" ? "claude-haiku-4-5" : "gemini-2.5-flash",
         confidence_score: confidence,
         created_by: input.created_by ?? null,
       })

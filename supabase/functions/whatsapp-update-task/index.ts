@@ -40,6 +40,19 @@ serve(async (req) => {
       )
     }
 
+    const { data: requester, error: requesterError } = await supabaseClient
+      .from('users')
+      .select('id, organization_id, is_active')
+      .eq('id', userId)
+      .single()
+
+    if (requesterError || !requester || requester.organization_id !== organizationId || requester.is_active === false) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'User not found' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 }
+      )
+    }
+
     // Validate update fields
     if (status && !VALID_STATUSES.includes(status)) {
       return new Response(

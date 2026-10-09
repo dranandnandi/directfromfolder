@@ -16,6 +16,11 @@ interface WhatsAppRequest {
   doctorName?: string;
   taskId?: string;
   notificationId?: string;
+  // Allows callers with no notification row (e.g. the admin "Send test message"
+  // action) to name the organization whose WhatsApp session should be used,
+  // and the user whose registered session should send it.
+  organizationId?: string;
+  userId?: string;
 }
 
 interface WhatsAppResponse {
@@ -65,8 +70,44 @@ serve(async (req) => {
       );
     }
 
-    const requestBody: WhatsAppRequest = await req.json();
-    const { phoneNumber, message, patientName, testName, doctorName, taskId, notificationId } = requestBody;
+    const rawBody = await req.json();
+
+    // Supabase Database Webhooks post {type, table, schema, record, old_record}
+    // rather than our flat shape. Map the inserted notification onto it so the
+    // same function serves both the webhook and direct callers.
+    let requestBody: WhatsAppRequest;
+
+    if (rawBody?.record && rawBody?.table === 'notifications') {
+      const row = rawBody.record;
+
+      // Nothing to deliver: not every notification is a WhatsApp notification.
+      if (!row.whatsapp_number || !row.ai_generated_message || row.whatsapp_sent) {
+        return new Response(
+          JSON.stringify({ success: true, skipped: true, reason: 'not a pending WhatsApp notification' }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      requestBody = {
+        phoneNumber: row.whatsapp_number,
+        message: row.ai_generated_message,
+        notificationId: row.id,
+      };
+    } else {
+      requestBody = rawBody as WhatsAppRequest;
+    }
+
+    const {
+      phoneNumber,
+      message,
+      patientName,
+      testName,
+      doctorName,
+      taskId,
+      notificationId,
+      organizationId: requestedOrganizationId,
+      userId: requestedUserId,
+    } = requestBody;
 
     // Validate required fields
     if (!phoneNumber || !message) {
@@ -82,23 +123,50 @@ serve(async (req) => {
     // Default to environment API URL
     let EFFECTIVE_API_URL = WHATSAPP_API_URL;
     let organizationId: string | null = null;
+    let userId: string | null = null;
 
-    // Check organization WhatsApp settings if notification ID is provided
+    // Check organization WhatsApp settings if notification ID is provided.
+    // notifications has no FK to organizations - the org is only reachable via
+    // the notified user, so resolve it in explicit steps rather than embedding.
     if (notificationId) {
-      const { data: notificationData } = await supabase
+      const { data: notificationData, error: notificationError } = await supabase
         .from('notifications')
-        .select(`
-          *,
-          users!inner(organization_id),
-          organizations!inner(id, whatsapp_enabled, auto_alerts_enabled, whatsapp_api_endpoint)
-        `)
+        .select('id, user_id')
         .eq('id', notificationId)
         .single();
 
+      if (notificationError || !notificationData) {
+        console.error('Could not load notification', notificationId, notificationError);
+      }
+
       if (notificationData) {
-        const org = notificationData.organizations;
-        organizationId = org.id || notificationData.users.organization_id;
-        
+        userId = notificationData.user_id;
+
+        const { data: notifiedUser, error: userLookupError } = await supabase
+          .from('users')
+          .select('organization_id')
+          .eq('id', notificationData.user_id)
+          .single();
+
+        if (userLookupError || !notifiedUser?.organization_id) {
+          console.error('Could not resolve organization for notification', notificationId, userLookupError);
+        }
+
+        const { data: org, error: orgLookupError } = notifiedUser?.organization_id
+          ? await supabase
+              .from('organizations')
+              .select('id, whatsapp_enabled, auto_alerts_enabled, whatsapp_api_endpoint')
+              .eq('id', notifiedUser.organization_id)
+              .single()
+          : { data: null, error: null };
+
+        if (orgLookupError) {
+          console.error('Could not load organization', notifiedUser?.organization_id, orgLookupError);
+        }
+
+        if (org) {
+        organizationId = org.id;
+
         // CHECK 1: Organization must have whatsapp_enabled = true
         if (!org.whatsapp_enabled) {
           console.log(`WhatsApp disabled for org ${organizationId} (whatsapp_enabled=false)`);
@@ -117,7 +185,39 @@ serve(async (req) => {
 
         // Use organization-specific API endpoint if configured
         EFFECTIVE_API_URL = org.whatsapp_api_endpoint || WHATSAPP_API_URL;
+        }
       }
+    } else if (requestedOrganizationId) {
+      // No notification row to derive the org from (test sends). Resolve the
+      // organization directly and apply the same whatsapp_enabled gate.
+      const { data: orgData } = await supabase
+        .from('organizations')
+        .select('id, whatsapp_enabled, whatsapp_api_endpoint')
+        .eq('id', requestedOrganizationId)
+        .single();
+
+      if (!orgData) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Organization not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (!orgData.whatsapp_enabled) {
+        console.log(`WhatsApp disabled for org ${orgData.id} (whatsapp_enabled=false)`);
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'WhatsApp is disabled for this organization',
+            skipped: true
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      organizationId = orgData.id;
+      userId = requestedUserId || null;
+      EFFECTIVE_API_URL = orgData.whatsapp_api_endpoint || WHATSAPP_API_URL;
     }
 
     // organizationId is required for the new API (CHECK 2: HR admin must be registered)
@@ -143,6 +243,7 @@ serve(async (req) => {
       phoneNumber: formattedPhone,
       message: message,
       organizationId: organizationId,  // Required for HR admin check
+      userId: userId,
       notificationId: notificationId,
       title: patientName ? `${patientName} - ${testName || 'Notification'}` : undefined,
       type: 'notification',

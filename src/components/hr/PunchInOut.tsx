@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { HiClock, HiLocationMarker, HiCamera, HiCheck, HiX, HiExclamationCircle } from 'react-icons/hi';
 import { AttendanceService } from '../../services/attendanceService';
-import { Attendance, DailyAttendanceStatus } from '../../models/attendance';
+import { Attendance, DailyAttendanceStatus, Shift } from '../../models/attendance';
 import { supabase } from '../../utils/supabaseClient';
 import { calculateDistance, formatDistance, parseGeofenceSettings } from '../../utils/geolocation';
 
@@ -156,6 +156,7 @@ const PunchInOut: React.FC = () => {
   };
 
   const [todayAttendance, setTodayAttendance] = useState<Attendance | null>(null);
+  const [assignedShift, setAssignedShift] = useState<Shift | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [address, setAddress] = useState<string>('');
@@ -207,8 +208,12 @@ const PunchInOut: React.FC = () => {
       }
 
       // Fetch current active attendance session (overnight-safe), else today's record.
-      const attendance = await AttendanceService.getTodayOrActiveAttendance(userData.id);
+      const [attendance, currentShift] = await Promise.all([
+        AttendanceService.getTodayOrActiveAttendance(userData.id),
+        AttendanceService.getEmployeeCurrentShift(userData.id)
+      ]);
       setTodayAttendance(attendance || null);
+      setAssignedShift(currentShift?.shift || null);
 
       // Get current location
       await getCurrentLocation();
@@ -316,7 +321,8 @@ const PunchInOut: React.FC = () => {
         status: 'not_punched',
         is_late: false,
         is_early_out: false,
-        is_half_day: false
+        is_half_day: false,
+        shift: assignedShift || undefined
       };
     }
 
@@ -327,7 +333,7 @@ const PunchInOut: React.FC = () => {
         is_late: false,
         is_early_out: false,
         is_half_day: false,
-        shift: todayAttendance.shift
+        shift: todayAttendance.shift || assignedShift || undefined
       };
     }
 
@@ -341,7 +347,7 @@ const PunchInOut: React.FC = () => {
         is_late: todayAttendance.is_late,
         is_early_out: todayAttendance.is_early_out,
         is_half_day: todayAttendance.is_half_day,
-        shift: todayAttendance.shift
+        shift: todayAttendance.shift || assignedShift || undefined
       };
     }
 
@@ -353,7 +359,7 @@ const PunchInOut: React.FC = () => {
         is_late: todayAttendance.is_late,
         is_early_out: false,
         is_half_day: todayAttendance.is_half_day,
-        shift: todayAttendance.shift
+        shift: todayAttendance.shift || assignedShift || undefined
       };
     }
 
@@ -362,7 +368,8 @@ const PunchInOut: React.FC = () => {
       status: 'not_punched',
       is_late: false,
       is_early_out: false,
-      is_half_day: false
+      is_half_day: false,
+      shift: todayAttendance.shift || assignedShift || undefined
     };
   };
 

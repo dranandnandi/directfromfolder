@@ -48,7 +48,8 @@ const RecurringTasksManager: React.FC<RecurringTasksManagerProps> = ({
           ),
           assigned_to_user:users!recurring_task_templates_assigned_to_fkey (
             id,
-            name
+            name,
+            is_active
           )
         `)
         .eq('organization_id', userData.organization_id)
@@ -56,7 +57,14 @@ const RecurringTasksManager: React.FC<RecurringTasksManagerProps> = ({
 
       if (error) throw error;
 
-      const formattedTemplates: RecurringTaskTemplate[] = (data || []).map(template => ({
+      const formattedTemplates: RecurringTaskTemplate[] = (data || [])
+        .filter((template: any) => {
+          const assignee = Array.isArray(template.assigned_to_user)
+            ? template.assigned_to_user[0]
+            : template.assigned_to_user;
+          return !template.assigned_to || assignee?.is_active !== false;
+        })
+        .map(template => ({
         id: template.id,
         organizationId: template.organization_id,
         createdBy: template.created_by,
@@ -144,7 +152,7 @@ const RecurringTasksManager: React.FC<RecurringTasksManagerProps> = ({
   const getTaskTypeLabel = (type: TaskType) => {
     switch (type) {
       case TaskType.RegularTask: return 'Regular Tasks';
-      case TaskType.PatientTracking: return 'Patient Tracking';
+      case TaskType.ClientTracking: return 'Client Tracking';
       case TaskType.AuditTask: return 'Audit Tasks';
       case TaskType.PersonalTask: return 'Personal Task';
       default: return type;

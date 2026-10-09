@@ -3,6 +3,7 @@ import { HiPlus, HiPencil, HiTrash, HiX } from 'react-icons/hi';
 import { User } from '../models/user';
 import AddUserForm from './AddUserForm';
 import { supabase } from '../utils/supabaseClient';
+import { withDefaultDepartments } from '../constants/departments';
 
 const TeamManagement = () => {
   const [members, setMembers] = useState<User[]>([]);
@@ -50,7 +51,7 @@ const TeamManagement = () => {
       if (orgError) throw orgError;
       if (!orgData) throw new Error('Organization not found');
 
-      setDepartments(orgData.departments || ['Management', 'Medical', 'Nursing']);
+      setDepartments(withDefaultDepartments(orgData.departments));
 
       // Fetch team members
       const { data: membersData, error: membersError } = await supabase

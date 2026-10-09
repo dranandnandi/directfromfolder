@@ -77,6 +77,7 @@ serve(async (req) => {
       .from('users')
       .select('id, name, email, whatsapp_number, role, department, created_at')
       .eq('organization_id', organizationId)
+      .eq('is_active', true)
       .order('name', { ascending: true });
 
     // Apply filters

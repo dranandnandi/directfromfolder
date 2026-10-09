@@ -29,6 +29,7 @@ import {
   AreaChart
 } from 'recharts';
 import { supabase } from '../utils/supabaseClient';
+import { useOrgDepartments } from '../hooks/useOrgDepartments';
 
 interface PerformanceMetrics {
   tasksCompleted: number;
@@ -93,12 +94,15 @@ const EnhancedPerformanceReports: React.FC<EnhancedPerformanceReportsProps> = ({
 }) => {
   const [selectedPeriod, setSelectedPeriod] = useState<'week' | 'month' | 'quarter' | 'year'>('month');
   const [selectedDepartment, setSelectedDepartment] = useState('all');
+  const { departments: orgDepartments } = useOrgDepartments();
   const [selectedUser, setSelectedUser] = useState('all');
   const [activeView, setActiveView] = useState<'overview' | 'individual' | 'trends' | 'insights'>('overview');
   const [loading, setLoading] = useState(false);
   const [performanceData, setPerformanceData] = useState<PerformanceData[]>([]);
   const [teamMetrics, setTeamMetrics] = useState<TeamMetrics | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [downloadDate, setDownloadDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [downloadingDate, setDownloadingDate] = useState(false);
 
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D'];
 
@@ -173,7 +177,8 @@ const EnhancedPerformanceReports: React.FC<EnhancedPerformanceReportsProps> = ({
       let userQuery = supabase
         .from('users')
         .select('id, name, department, role')
-        .eq('organization_id', currentUserData.organization_id);
+        .eq('organization_id', currentUserData.organization_id)
+        .eq('is_active', true);
 
       if (!isAdmin && currentUserId) {
         userQuery = userQuery.eq('id', currentUserId);
@@ -475,6 +480,118 @@ const EnhancedPerformanceReports: React.FC<EnhancedPerformanceReportsProps> = ({
     }
   };
 
+  const downloadTasksForDate = async () => {
+    if (!downloadDate) return;
+    setDownloadingDate(true);
+    try {
+      const { data: currentUser } = await supabase.auth.getUser();
+      if (!currentUser.user?.id) throw new Error('Not authenticated');
+
+      const { data: currentUserData } = await supabase
+        .from('users')
+        .select('organization_id')
+        .eq('auth_id', currentUser.user.id)
+        .single();
+
+      if (!currentUserData?.organization_id) throw new Error('Organization not found');
+
+      const dayStart = new Date(downloadDate);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(downloadDate);
+      dayEnd.setHours(23, 59, 59, 999);
+
+      // Fetch org tasks for the date
+      const { data: orgTasks } = await supabase
+        .from('tasks')
+        .select(`
+          *,
+          assigned_to:users(id, name, department, role, is_active)
+        `)
+        .eq('organization_id', currentUserData.organization_id)
+        .gte('due_date', dayStart.toISOString())
+        .lte('due_date', dayEnd.toISOString());
+
+      // Fetch personal tasks for the date
+      const { data: personalTasks } = await supabase
+        .from('personal_tasks')
+        .select(`
+          *,
+          assignee:users(id, name, department, role, is_active)
+        `)
+        .gte('due_date', dayStart.toISOString())
+        .lte('due_date', dayEnd.toISOString());
+
+      const allTasks = [
+        ...(orgTasks || [])
+          .filter((t: any) => {
+            const assignee = Array.isArray(t.assigned_to) ? t.assigned_to[0] : t.assigned_to;
+            return !t.assigned_to || assignee?.is_active !== false;
+          })
+          .map((t: any) => ({
+          Title: t.title,
+          Description: t.description || '',
+          Type: t.type || 'Regular Task',
+          Status: t.status || '',
+          Priority: t.priority || '',
+          'Due Date': t.due_date ? new Date(t.due_date).toLocaleString() : '',
+          'Assigned To': Array.isArray(t.assigned_to)
+            ? t.assigned_to.map((u: any) => u.name).join(', ')
+            : t.assigned_to?.name || '',
+          Department: Array.isArray(t.assigned_to)
+            ? t.assigned_to.map((u: any) => u.department).join(', ')
+            : t.assigned_to?.department || '',
+          'Completed At': t.completed_at ? new Date(t.completed_at).toLocaleString() : '',
+          Source: 'Team'
+        })),
+        ...(personalTasks || [])
+          .filter((t: any) => {
+            const assignee = Array.isArray(t.assignee) ? t.assignee[0] : t.assignee;
+            return !t.assignee_id || assignee?.is_active !== false;
+          })
+          .map((t: any) => ({
+          Title: t.title,
+          Description: t.description || '',
+          Type: 'Personal Task',
+          Status: t.status || '',
+          Priority: t.priority || '',
+          'Due Date': t.due_date ? new Date(t.due_date).toLocaleString() : '',
+          'Assigned To': Array.isArray(t.assignee)
+            ? t.assignee.map((u: any) => u.name).join(', ')
+            : t.assignee?.name || '',
+          Department: Array.isArray(t.assignee)
+            ? t.assignee.map((u: any) => u.department).join(', ')
+            : t.assignee?.department || '',
+          'Completed At': t.completed_at ? new Date(t.completed_at).toLocaleString() : '',
+          Source: 'Personal'
+        }))
+      ];
+
+      if (allTasks.length === 0) {
+        alert(`No tasks found for ${downloadDate}`);
+        return;
+      }
+
+      const headers = Object.keys(allTasks[0]).join(',');
+      const rows = allTasks.map(row =>
+        Object.values(row).map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')
+      );
+      const csvContent = [headers, ...rows].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `tasks-${downloadDate}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error downloading tasks for date:', error);
+      alert('Failed to download tasks');
+    } finally {
+      setDownloadingDate(false);
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       <div className="flex justify-between items-center">
@@ -506,6 +623,29 @@ const EnhancedPerformanceReports: React.FC<EnhancedPerformanceReportsProps> = ({
           <h3 className="text-lg font-medium">Report Configuration</h3>
         </div>
         
+        {/* Download tasks for a specific date */}
+        <div className="flex items-end gap-3 mb-4 p-4 bg-blue-50 rounded-lg border border-blue-100">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Download Tasks for Date
+            </label>
+            <input
+              type="date"
+              value={downloadDate}
+              onChange={(e) => setDownloadDate(e.target.value)}
+              className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm"
+            />
+          </div>
+          <button
+            onClick={downloadTasksForDate}
+            disabled={downloadingDate || !downloadDate}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-blue-300 flex items-center gap-2 text-sm h-9"
+          >
+            <HiDownload className="w-4 h-4" />
+            {downloadingDate ? 'Downloading...' : 'Download Tasks'}
+          </button>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -533,9 +673,11 @@ const EnhancedPerformanceReports: React.FC<EnhancedPerformanceReportsProps> = ({
               className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
             >
               <option value="all">All Departments</option>
-              <option value="Medical">Medical</option>
-              <option value="Nursing">Nursing</option>
-              <option value="Management">Management</option>
+              {orgDepartments.map((department) => (
+                <option key={department} value={department}>
+                  {department}
+                </option>
+              ))}
             </select>
           </div>
 

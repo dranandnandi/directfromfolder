@@ -247,7 +247,7 @@ const GeofenceSettingsComponent: React.FC<GeofenceSettingsProps> = ({ organizati
             value={address}
             onChange={(e) => setAddress(e.target.value)}
             className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-            placeholder="e.g., 123 Medical Center Road, New Delhi"
+            placeholder="e.g., 123 Business Park Road, New Delhi"
           />
         </div>
 

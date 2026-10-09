@@ -52,11 +52,12 @@ serve(async (req) => {
     // Verify user exists and belongs to organization
     const { data: userData, error: userError } = await supabaseAdmin
       .from('users')
-      .select('id, name, organization_id')
+      .select('id, name, organization_id, is_active')
       .eq('id', userId)
       .single();
 
     if (userError || !userData) throw new Error('User not found');
+    if (userData.is_active === false) throw new Error('User is inactive');
     if (userData.organization_id !== organizationId) throw new Error('User does not belong to this organization');
 
     console.log('User verified:', userData.name);

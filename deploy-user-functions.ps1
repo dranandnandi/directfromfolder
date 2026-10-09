@@ -33,6 +33,14 @@ Write-Host "📦 Deploying delete-user function..." -ForegroundColor Green
 supabase functions deploy delete-user --no-verify-jwt
 
 Write-Host ""
+Write-Host "Deploying reset-user-password function..." -ForegroundColor Green
+supabase functions deploy reset-user-password --no-verify-jwt
+
+Write-Host ""
+Write-Host "Deploying restore-user function..." -ForegroundColor Green
+supabase functions deploy restore-user --no-verify-jwt
+
+Write-Host ""
 Write-Host "✅ All user management functions deployed successfully!" -ForegroundColor Green
 Write-Host ""
 Write-Host "📝 Make sure to set environment variables in Supabase Dashboard:" -ForegroundColor Yellow

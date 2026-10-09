@@ -46,13 +46,22 @@ function useQueryParams() {
   return useMemo(() => new URLSearchParams(search), [search]);
 }
 
-function stripToInt(v: any, fallback: number) {
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.max(1, Math.floor(n)) : fallback;
+/** Number(null) and Number("") are both 0, so an absent param has to be
+ *  rejected before the numeric check or it silently reads as month 0. */
+function toNumber(v: any) {
+  if (v === null || v === undefined || String(v).trim() === "") return NaN;
+  return Number(v);
+}
+
+function clampMonth(v: any, fallback: number) {
+  const n = toNumber(v);
+  if (!Number.isFinite(n)) return fallback;
+  const month = Math.floor(n);
+  return month >= 1 && month <= 12 ? month : fallback;
 }
 
 function clampYear(v: any, fallback: number) {
-  const n = Number(v);
+  const n = toNumber(v);
   if (!Number.isFinite(n)) return fallback;
   const year = Math.floor(n);
   return year >= 2000 && year <= 2100 ? year : fallback;
@@ -131,14 +140,14 @@ function InnerShell() {
   const { organizationId } = useOrganization();
 
   // State
-  const initialMonth = stripToInt(params.get("month"), DEFAULT_MONTH);
+  const initialMonth = clampMonth(params.get("month"), DEFAULT_MONTH);
   const initialYear = clampYear(params.get("year"), DEFAULT_YEAR);
   const [month, setMonth] = useState(initialMonth);
   const [year, setYear] = useState(initialYear);
 
   // Sync URL
   useEffect(() => {
-    const currentMonth = stripToInt(params.get("month"), DEFAULT_MONTH);
+    const currentMonth = clampMonth(params.get("month"), DEFAULT_MONTH);
     const currentYear = clampYear(params.get("year"), DEFAULT_YEAR);
 
     if (month !== currentMonth || year !== currentYear) {

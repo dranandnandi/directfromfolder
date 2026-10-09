@@ -1,5 +1,29 @@
 import { supabase } from '../utils/supabaseClient';
 
+interface EdgeFunctionErrorPayload {
+  success?: boolean;
+  error?: string;
+  code?: string;
+  details?: string[];
+}
+
+async function extractEdgeFunctionError(error: any, fallbackMessage: string): Promise<Error> {
+  try {
+    const response = error?.context;
+    if (response && typeof response.json === 'function') {
+      const payload = (await response.json()) as EdgeFunctionErrorPayload;
+      if (payload?.error) {
+        const detailText = payload.details?.length ? ` ${payload.details.join(' ')}` : '';
+        return new Error(`${payload.error}${detailText}`.trim());
+      }
+    }
+  } catch (parseError) {
+    console.error('Failed to parse edge function error response:', parseError);
+  }
+
+  return new Error(error?.message || fallbackMessage);
+}
+
 export interface CreateUserData {
   email: string;
   password: string;
@@ -8,7 +32,7 @@ export interface CreateUserData {
   role: 'user' | 'admin' | 'superadmin';
   department: string;
   organizationId: string;
-  phone?: string;
+  phone: string;
 }
 
 export interface UpdateProfileData {
@@ -33,6 +57,7 @@ export interface UserProfile {
   updated_at: string;
   onboarding_state?: string;
   last_active_at?: string;
+  is_active: boolean;
 }
 
 /**
@@ -84,7 +109,7 @@ export async function createUser(userData: CreateUserData): Promise<UserProfile>
 
     if (error) {
       console.error('Edge function error:', error);
-      throw new Error(error.message || 'Failed to create user');
+      throw await extractEdgeFunctionError(error, 'Failed to create user');
     }
 
     if (!data || !data.success) {
@@ -134,7 +159,7 @@ export async function updateProfile(
 
     if (error) {
       console.error('Edge function error:', error);
-      throw new Error(error.message || 'Failed to update user');
+      throw await extractEdgeFunctionError(error, 'Failed to update user');
     }
 
     if (!data || !data.success) {
@@ -173,7 +198,7 @@ export async function deleteUser(userId: string): Promise<void> {
 
     if (error) {
       console.error('Edge function error:', error);
-      throw new Error(error.message || 'Failed to delete user');
+      throw await extractEdgeFunctionError(error, 'Failed to delete user');
     }
 
     if (!data || !data.success) {
@@ -188,6 +213,33 @@ export async function deleteUser(userId: string): Promise<void> {
   }
 }
 
+export async function restoreUser(userId: string): Promise<void> {
+  try {
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !session) {
+      throw new Error('No active session. Please log in again.');
+    }
+
+    const { data, error } = await supabase.functions.invoke('restore-user', {
+      body: { userId },
+      headers: {
+        Authorization: `Bearer ${session.access_token}`
+      }
+    });
+
+    if (error) {
+      throw await extractEdgeFunctionError(error, 'Failed to restore user');
+    }
+
+    if (!data?.success) {
+      throw new Error(data?.error || 'Failed to restore user');
+    }
+  } catch (error: any) {
+    console.error('Error restoring user:', error);
+    throw error;
+  }
+}
+
 /**
  * Get all users for an organization
  */
@@ -197,7 +249,6 @@ export async function getOrganizationUsers(organizationId: string): Promise<User
       .from('users')
       .select('*')
       .eq('organization_id', organizationId)
-      .neq('is_active', false)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -212,18 +263,30 @@ export async function getOrganizationUsers(organizationId: string): Promise<User
   }
 }
 
-/**
- * Reset user password (admin function)
- * Note: This would require a separate edge function - not implemented yet
- * For now, use Supabase dashboard or email-based password reset
- */
 export async function resetUserPassword(
-  _authUserId: string, 
-  _newPassword: string
+  userId: string,
+  newPassword: string
 ): Promise<void> {
   try {
-    // TODO: Implement reset-password edge function
-    throw new Error('Password reset via admin API is not available. Please use email-based password reset.');
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !session) {
+      throw new Error('No active session. Please log in again.');
+    }
+
+    const { data, error } = await supabase.functions.invoke('reset-user-password', {
+      body: { userId, newPassword },
+      headers: {
+        Authorization: `Bearer ${session.access_token}`
+      }
+    });
+
+    if (error) {
+      throw await extractEdgeFunctionError(error, 'Failed to reset password');
+    }
+
+    if (!data?.success) {
+      throw new Error(data?.error || 'Failed to reset password');
+    }
 
   } catch (error: any) {
     console.error('Error resetting password:', error);
@@ -248,7 +311,8 @@ function convertDatabaseProfile(dbRecord: any): UserProfile {
     created_at: dbRecord.created_at,
     updated_at: dbRecord.updated_at,
     onboarding_state: dbRecord.onboarding_state,
-    last_active_at: dbRecord.last_active_at
+    last_active_at: dbRecord.last_active_at,
+    is_active: dbRecord.is_active !== false
   };
 }
 
@@ -256,6 +320,7 @@ export const authService = {
   createUser,
   updateProfile,
   deleteUser,
+  restoreUser,
   getOrganizationUsers,
   resetUserPassword
 };

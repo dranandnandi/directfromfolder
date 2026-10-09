@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Staff Management — Sales Sheet</title>
+<style>
+/* ─────────────────────────────────────────────────────────
+   PALETTE — drawn from the attendance register itself.
+   ledger ivory · register ink · attestation green ·
+   brass (the punch clock) · ruled line · vermilion (RESERVED
+   for the loss beat, used nowhere else on the page)
+   ───────────────────────────────────────────────────────── */
+:root{
+  --ledger:#FBF7EE; --surface:#FFFFFF;
+  --ink:#16241F; --ink-soft:#4C5C54; --ink-faint:#7A8880;
+  --seal:#0B5B4A; --seal-tint:#E6EFEA;
+  --brass:#8A5A12; --brass-tint:#F6EEDD;
+  --rule:#D9CEB8;
+  --vermilion:#A81F27; --vermilion-tint:#FBEDEC;
+
+  --display:ui-sans-serif,system-ui,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --body:ui-sans-serif,system-ui,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --ledger-type:ui-monospace,"Cascadia Mono",Consolas,"Liberation Mono",Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ledger:#0F1512;--surface:#18211D;--ink:#EAE6DA;--ink-soft:#9CAAA1;
+    --ink-faint:#71807A;--seal:#4FB79B;--seal-tint:#16302A;--brass:#D9A441;
+    --brass-tint:#241D0F;--rule:#2B3730;--vermilion:#EE7A80;--vermilion-tint:#2A1618;
+  }
+}
+:root[data-theme="dark"]{
+  --ledger:#0F1512;--surface:#18211D;--ink:#EAE6DA;--ink-soft:#9CAAA1;
+  --ink-faint:#71807A;--seal:#4FB79B;--seal-tint:#16302A;--brass:#D9A441;
+  --brass-tint:#241D0F;--rule:#2B3730;--vermilion:#EE7A80;--vermilion-tint:#2A1618;
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--ledger);color:var(--ink);
+  font-family:var(--body);font-size:9.4pt;line-height:1.38;
+  -webkit-font-smoothing:antialiased}
+.sheet{width:210mm;min-height:297mm;margin:0 auto;padding:9mm 11mm 7mm;background:var(--surface)}
+@media screen{
+  body{padding:24px 12px}
+  .sheet{box-shadow:0 1px 3px rgba(0,0,0,.14),0 18px 44px rgba(0,0,0,.10);max-width:100%}
+}
+
+/* ── masthead ─────────────────────────────────────────── */
+.mast{display:flex;align-items:baseline;justify-content:space-between;gap:7mm;
+  padding-bottom:2mm;border-bottom:1.6pt solid var(--seal)}
+.wordmark{font-family:var(--display);font-weight:700;font-size:10.5pt;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--seal)}
+.kicker{font-family:var(--ledger-type);font-size:6.6pt;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-soft);text-align:right;line-height:1.5}
+
+/* ── hook + promise ───────────────────────────────────── */
+.hook{font-family:var(--display);font-weight:800;font-size:26pt;line-height:1.02;
+  letter-spacing:-.022em;margin:4.4mm 0 0;break-inside:avoid}
+.hook em{font-style:normal;color:var(--seal)}
+.promise{margin:2.8mm 0 0;font-size:11.4pt;line-height:1.32;font-weight:500;
+  max-width:160mm;break-inside:avoid}
+.promise b{font-weight:700;color:var(--brass)}
+.promise .clause{display:block;margin-top:1.4mm;font-size:8.1pt;line-height:1.42;
+  font-weight:400;color:var(--ink-soft);max-width:158mm}
+
+/* ── section furniture ────────────────────────────────── */
+.sec{margin-top:4.6mm;break-inside:avoid}
+.sec-h{font-family:var(--ledger-type);font-size:6.9pt;font-weight:700;letter-spacing:.17em;
+  text-transform:uppercase;color:var(--seal);padding-bottom:1mm;margin-bottom:2.4mm;
+  border-bottom:.6pt solid var(--rule)}
+
+/* ── scope: three boxes ───────────────────────────────── */
+.scope{display:grid;grid-template-columns:repeat(3,1fr);gap:3mm}
+.box{border:.8pt solid var(--rule);border-top:2pt solid var(--seal);
+  padding:2.6mm 2.8mm;break-inside:avoid}
+.box h3{font-family:var(--display);font-size:9.6pt;font-weight:700;margin:0 0 1.2mm;
+  letter-spacing:-.01em}
+.box p{margin:0;font-size:7.8pt;line-height:1.4;color:var(--ink-soft)}
+.box p b{color:var(--ink)}
+.box .replaces{display:block;margin-top:1.8mm;padding-top:1.4mm;
+  border-top:.5pt dotted var(--rule);font-family:var(--ledger-type);font-size:6.3pt;
+  letter-spacing:.05em;text-transform:uppercase;color:var(--brass)}
+
+/* ── six pillars ──────────────────────────────────────── */
+.pillars{display:grid;grid-template-columns:1fr 1fr;gap:2.6mm 6mm}
+.p{break-inside:avoid;padding-left:3.4mm;border-left:1.6pt solid var(--seal-tint)}
+.p .ph{display:flex;align-items:baseline;gap:1.8mm;margin-bottom:.8mm}
+.p .pn{font-family:var(--ledger-type);font-size:6.6pt;font-weight:700;color:var(--brass)}
+.p h4{margin:0;font-family:var(--display);font-size:9.4pt;font-weight:700;
+  letter-spacing:-.008em}
+.p p{margin:0;font-size:7.9pt;line-height:1.4;color:var(--ink-soft)}
+.p .tell{color:var(--ink);font-weight:600}
+
+/* ── loss — the ONLY vermilion on the page ────────────── */
+.loss{background:var(--vermilion-tint);border-left:2.4pt solid var(--vermilion);
+  padding:2.8mm 3.4mm 3mm;break-inside:avoid}
+.loss .sec-h{color:var(--vermilion);border-bottom-color:var(--vermilion);margin-bottom:2mm}
+.loss ul{margin:0;padding:0;list-style:none;display:grid;
+  grid-template-columns:1fr 1fr;gap:1.8mm 6mm}
+.loss li{font-size:7.9pt;line-height:1.4;position:relative;padding-left:4mm;
+  break-inside:avoid}
+.loss li::before{content:"—";position:absolute;left:0;top:0;color:var(--vermilion);
+  font-weight:700}
+.loss em{font-style:italic}
+
+/* ── authority ────────────────────────────────────────── */
+.refuse{list-style:none;margin:0;padding:0;display:grid;
+  grid-template-columns:1fr 1fr;gap:1.3mm 6mm}
+.refuse li{font-size:7.9pt;line-height:1.38;padding-left:4.2mm;position:relative;
+  break-inside:avoid}
+.refuse li::before{content:"✕";position:absolute;left:0;top:.2mm;font-size:7pt;
+  font-weight:700;color:var(--seal)}
+.refuse code{font-family:var(--ledger-type);font-size:7.1pt;background:var(--seal-tint);
+  color:var(--ink);padding:.2mm .8mm;border-radius:1pt}
+
+/* ── action ───────────────────────────────────────────── */
+.action{margin-top:4.6mm;border-top:1.6pt solid var(--seal);padding-top:2.8mm;
+  display:flex;gap:5mm;align-items:flex-start;break-inside:avoid}
+.action .big{font-family:var(--display);font-weight:800;font-size:13.5pt;line-height:1.08;
+  letter-spacing:-.018em;flex:0 0 56mm;color:var(--seal)}
+.action .steps{margin:0;padding:0;list-style:none;font-size:8.1pt;line-height:1.44}
+.action .steps li{padding-left:5.6mm;position:relative;margin-bottom:.7mm}
+.action .steps li span{position:absolute;left:0;font-family:var(--ledger-type);
+  font-size:6.9pt;font-weight:700;color:var(--brass)}
+.foot{margin-top:2.8mm;font-family:var(--ledger-type);font-size:6.2pt;letter-spacing:.05em;
+  color:var(--ink-faint);text-transform:uppercase;line-height:1.6}
+
+/* ── print ────────────────────────────────────────────── */
+@page{size:A4;margin:0}
+@media print{
+  :root,:root[data-theme="dark"]{
+    --ledger:#FFFFFF;--surface:#FFFFFF;--ink:#16241F;--ink-soft:#4C5C54;
+    --ink-faint:#7A8880;--seal:#0B5B4A;--seal-tint:#E6EFEA;--brass:#8A5A12;
+    --brass-tint:#F6EEDD;--rule:#D9CEB8;--vermilion:#A81F27;--vermilion-tint:#FBEDEC;
+  }
+  body{background:#fff;padding:0;font-size:9.1pt}
+  .sheet{width:auto;min-height:0;box-shadow:none;margin:0;padding:8mm 11mm}
+  .sheet,.sec,.box,.p,.loss,.loss li,.refuse li,.action,.hook,.promise,
+  .scope,.pillars,h3,h4,ul,li,p{break-inside:avoid;page-break-inside:avoid}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+@media (max-width:760px){
+  .sheet{padding:7mm}
+  .hook{font-size:21pt}
+  .scope,.pillars,.loss ul,.refuse{grid-template-columns:1fr}
+  .action{flex-direction:column;gap:3mm}
+  .action .big{flex:none}
+}
+</style>
+</head>
+<body>
+<main class="sheet">
+
+  <header class="mast">
+    <div class="wordmark">Staff&nbsp;Management</div>
+    <div class="kicker">Punch · Leave · Task · WhatsApp · Pay · Appraisal<br>Android app, browser, and the chat they already use</div>
+  </header>
+
+  <h1 class="hook">Stop reconciling registers.<br><em>Start running people.</em></h1>
+
+  <p class="promise">
+    <b>Lock the month.</b> Every payslip is already written — payable days, loss of pay,
+    provident fund, state insurance and professional tax, on a printed A4 slip per employee.
+    <span class="clause">Because the punch, the leave, the task and the message all landed in the
+    same place as they happened. Nothing is retyped at month end, because nothing was ever kept
+    anywhere else. The run refuses to compute until the period is locked — so no figure is ever
+    calculated against a month that is still moving.</span>
+  </p>
+
+  <section class="sec">
+    <div class="sec-h">Six things you run today. One system, and one chat window.</div>
+    <div class="scope">
+      <div class="box">
+        <h3>The day</h3>
+        <p><b>Punch &amp; Leave.</b> A punch carrying a photograph and coordinates. Shifts with
+        grace minutes and dated assignment. Night shifts that cross midnight and stay one shift.
+        Leave routed to a real approver and recorded with their name on the decision.</p>
+        <span class="replaces">Replaces the muster register</span>
+      </div>
+      <div class="box">
+        <h3>The work</h3>
+        <p><b>Task &amp; WhatsApp.</b> Tasks with an owner, a due date and a reminder ladder.
+        Recurring duties on six frequencies. Ten operations reachable from WhatsApp — assign,
+        complete, list, apply for leave, approve it, ask who is in today.</p>
+        <span class="replaces">Replaces the group chat</span>
+      </div>
+      <div class="box">
+        <h3>The month &amp; the year</h3>
+        <p><b>Pay &amp; Appraisal.</b> Dated salary structures, payable days from the punches,
+        statutory to Indian ceilings and state slabs, a payslip PDF per person per month. Then
+        thirty-one measured facts per employee, in one score you can print.</p>
+        <span class="replaces">Replaces the salary sheet</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-h">How the six work — and the part only a practitioner notices</div>
+    <div class="pillars">
+
+      <div class="p">
+        <div class="ph"><span class="pn">01</span><h4>Punch</h4></div>
+        <p>A photograph and coordinates, taken at the moment.
+        <span class="tell">It stores the distance in metres</span> — so forty metres past the
+        boundary and four kilometres away stay different records months later. Strict mode refuses
+        the punch and writes nothing; warning mode allows it and flags the distance. A night shift
+        belongs to the day it began, and punch-out searches two days back to find it.</p>
+      </div>
+
+      <div class="p">
+        <div class="ph"><span class="pn">02</span><h4>Leave</h4></div>
+        <p>Applied for in one message, routed to a named administrator, decided within a stated
+        day. <span class="tell">Leave filed after it was taken is flagged automatically</span> at
+        the moment of filing — and that same flag is what the appraisal scores months later. The
+        decision carries who approved it, when, and why.</p>
+      </div>
+
+      <div class="p">
+        <div class="ph"><span class="pn">03</span><h4>Task</h4></div>
+        <p>Reminders fire a day, six hours, two hours, one hour and thirty minutes before due.
+        <span class="tell">Reassign it and the old owner's pending reminders are deleted</span> —
+        nobody is chased about work that stopped being theirs. Recurring duties on six frequencies,
+        and creating the schedule creates the first task the same day.</p>
+      </div>
+
+      <div class="p">
+        <div class="ph"><span class="pn">04</span><h4>WhatsApp</h4></div>
+        <p>Ten operations from chat, so the technician who will never install anything still gets
+        counted. Partial names resolve and word order does not matter. Completing a task is refused
+        unless it is yours. <span class="tell">Absentees are found by diffing the roster against
+        the punches</span> — a report that lists the attendance table can never show you who is
+        missing.</p>
+      </div>
+
+      <div class="p">
+        <div class="ph"><span class="pn">05</span><h4>Pay</h4></div>
+        <p>Payable days ÷ working days becomes the pro-rata factor,
+        <span class="tell">applied to earnings only, never to deductions</span> — the line item
+        that quietly under-deducts provident fund. PF on Basic+DA capped at ₹15,000; ESIC within
+        ₹21,000; professional tax on real state slabs. If the CTC already lists a statutory line,
+        the computed one is zeroed. No double deduction.</p>
+      </div>
+
+      <div class="p">
+        <div class="ph"><span class="pn">06</span><h4>Appraisal</h4></div>
+        <p>Thirty-one measured facts per person across tasks, attendance, leave and conversations.
+        Completion 30%, attendance and punctuality 25% each, leave planning and communication 10%.
+        <span class="tell">The weighting normalises over the data that exists</span>, so nobody is
+        marked down for a category they were never measured in. Prints as a PDF with the top three
+        named.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="sec loss">
+    <div class="sec-h">What you are losing today</div>
+    <ul>
+      <li>The 2nd of the month. Two registers, one Excel sheet, and a supervisor who will
+      "send the night-shift numbers by evening." Payroll waits for him.</li>
+      <li>The man who punched in at 9:50 pm and out at 6:10 am reads as two half days. You fix it
+      by hand. Every month. For every one of them.</li>
+      <li>Salary day, and a message: <em>sir, ₹1,840 kam aaya.</em> Nobody can say which day was
+      cut. You pay the difference to end it.</li>
+      <li>The leave "informed on WhatsApp" in April, now four thousand messages up a group chat.
+      No record, no argument, so the day is paid.</li>
+    </ul>
+  </section>
+
+  <section class="sec">
+    <div class="sec-h">What it refuses to allow</div>
+    <ul class="refuse">
+      <li>Payroll on an open month. <code>period must be locked to finalize</code></li>
+      <li>Paying anyone with no salary structure on record for that month.</li>
+      <li>Completing a colleague's task from chat. <code>only tasks assigned to you</code></li>
+      <li>Approving leave without being an admin — and you only ever see requests routed to you.</li>
+      <li>Assigning work across organisations. <code>assignee does not belong</code></li>
+      <li>Acting at all from a deactivated account. <code>user is inactive</code></li>
+      <li>A second punch-in while one is open; a punch-out with nothing open.</li>
+      <li>Deleting a task without admin rights — held in the database, not by hiding a button.</li>
+    </ul>
+  </section>
+
+  <section class="action">
+    <div class="big">Ninety minutes,<br>your last closed month.</div>
+    <ul class="steps">
+      <li><span>01</span>Bring one real biometric export and one real salary structure — the messy ones.</li>
+      <li><span>02</span>Load it, accept the rows, reject the bad ones, lock the period.</li>
+      <li><span>03</span>Open a payslip and read the six attendance figures printed on it. Set it
+      beside the sheet you actually paid, and find where the two disagree.</li>
+      <li><span>04</span>Then message it: assign a task by half a name, ask who is in today, apply
+      for a day's leave — and watch it reach an administrator with your name on it.</li>
+      <li><span>05</span>Then try to break it. Run payroll on an unlocked month, complete someone
+      else's task, approve your own leave. Confirm each refusal holds.</li>
+    </ul>
+  </section>
+
+  <p class="foot">Staff Management · Punch, Leave, Task, WhatsApp, Pay, Appraisal · Android app,
+  browser and WhatsApp · deployed per organisation · roles: superadmin, admin, user ·
+  row-level isolation per organisation</p>
+
+</main>
+</body>
+</html>

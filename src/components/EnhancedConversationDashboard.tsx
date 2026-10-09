@@ -14,6 +14,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import ConversationList from './ConversationList';
 import ConversationDetails from './ConversationDetails';
 import { supabase } from '../utils/supabaseClient';
+import { useOrgDepartments } from '../hooks/useOrgDepartments';
 
 interface ConversationAnalysis {
   overall_tone: string;
@@ -85,6 +86,7 @@ const EnhancedConversationDashboard: React.FC<EnhancedConversationDashboardProps
   });
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d'>('30d');
   const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
+  const { departments: orgDepartments } = useOrgDepartments();
 
   useEffect(() => {
     fetchCurrentUser();
@@ -347,9 +349,11 @@ const EnhancedConversationDashboard: React.FC<EnhancedConversationDashboardProps
               className="px-3 py-2 border rounded-lg"
             >
               <option value="all">All Departments</option>
-              <option value="Medical">Medical</option>
-              <option value="Nursing">Nursing</option>
-              <option value="Management">Management</option>
+              {orgDepartments.map((department) => (
+                <option key={department} value={department}>
+                  {department}
+                </option>
+              ))}
             </select>
           )}
         </div>

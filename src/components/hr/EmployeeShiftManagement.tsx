@@ -19,6 +19,13 @@ interface EmployeeWithShift extends User {
   };
 }
 
+const formatAssignmentDate = (date: string) => new Date(`${date}T00:00:00`).toLocaleDateString();
+
+const formatAssignmentRange = (assignment: { effective_from: string; effective_to?: string }) => {
+  const from = formatAssignmentDate(assignment.effective_from);
+  return assignment.effective_to ? `${from} - ${formatAssignmentDate(assignment.effective_to)}` : `Since ${from}`;
+};
+
 const EmployeeShiftManagement: React.FC = () => {
   const [employees, setEmployees] = useState<EmployeeWithShift[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -55,21 +62,21 @@ const EmployeeShiftManagement: React.FC = () => {
 
       // Fetch employees and shifts
       const [employeesData, shiftsData, assignmentsData] = await Promise.all([
-        supabase
-          .from('users')
-          .select('id, name, department, email')
-          .eq('organization_id', userData.organization_id)
-          .eq('role', 'user')
-          .order('name'),
+        AttendanceService.getOrganizationEmployees(userData.organization_id),
         AttendanceService.getShiftsByOrganization(userData.organization_id),
         AttendanceService.getShiftAssignments(userData.organization_id)
       ]);
 
-      if (employeesData.error) throw employeesData.error;
-
+      const today = new Date().toISOString().split('T')[0];
       const latestActiveAssignmentByUser = new Map<string, any>();
       for (const assignment of assignmentsData || []) {
-        if (assignment.effective_to) continue;
+        const hasInvalidClosedRange = Boolean(
+          assignment.effective_to && assignment.effective_to < assignment.effective_from
+        );
+        if (
+          assignment.effective_from > today ||
+          (assignment.effective_to && assignment.effective_to < today && !hasInvalidClosedRange)
+        ) continue;
         const prev = latestActiveAssignmentByUser.get(assignment.user_id);
         if (!prev) {
           latestActiveAssignmentByUser.set(assignment.user_id, assignment);
@@ -83,7 +90,7 @@ const EmployeeShiftManagement: React.FC = () => {
       }
 
       // Combine employees with their current shift assignments
-      const employeesWithShifts: EmployeeWithShift[] = (employeesData.data || []).map(employee => {
+      const employeesWithShifts: EmployeeWithShift[] = employeesData.map(employee => {
         const currentAssignment = latestActiveAssignmentByUser.get(employee.id);
 
         return {
@@ -105,9 +112,13 @@ const EmployeeShiftManagement: React.FC = () => {
     }
   };
 
-  const handleAssignShift = async (shiftId: string, effectiveDate: string) => {
+  const handleAssignShift = async (shiftId: string, effectiveDate: string, effectiveToDate?: string) => {
     if (selectedEmployees.length === 0) {
       alert('Please select at least one employee');
+      return;
+    }
+    if (effectiveToDate && effectiveToDate < effectiveDate) {
+      alert('Effective upto date cannot be before effective from date');
       return;
     }
 
@@ -134,6 +145,7 @@ const EmployeeShiftManagement: React.FC = () => {
             user_id: employeeId,
             shift_id: shiftId,
             effective_from: effectiveDate,
+            effective_to: effectiveToDate || undefined,
             assigned_by: userData.id
           });
           successCount++;
@@ -286,7 +298,7 @@ const EmployeeShiftManagement: React.FC = () => {
                           {employee.currentShift.shift.start_time} - {employee.currentShift.shift.end_time}
                         </div>
                         <div className="text-xs text-green-600">
-                          Since {new Date(employee.currentShift.effective_from).toLocaleDateString()}
+                          {formatAssignmentRange(employee.currentShift)}
                         </div>
                       </div>
                     ) : (
@@ -322,7 +334,7 @@ interface AssignShiftModalProps {
   onClose: () => void;
   shifts: Shift[];
   selectedEmployeeCount: number;
-  onAssign: (shiftId: string, effectiveDate: string) => void;
+  onAssign: (shiftId: string, effectiveDate: string, effectiveToDate?: string) => void;
 }
 
 const AssignShiftModal: React.FC<AssignShiftModalProps> = ({
@@ -334,13 +346,18 @@ const AssignShiftModal: React.FC<AssignShiftModalProps> = ({
 }) => {
   const [selectedShift, setSelectedShift] = useState<string>('');
   const [effectiveDate, setEffectiveDate] = useState(new Date().toISOString().split('T')[0]);
+  const [effectiveToDate, setEffectiveToDate] = useState('');
 
   const handleSubmit = () => {
     if (!selectedShift) {
       alert('Please select a shift');
       return;
     }
-    onAssign(selectedShift, effectiveDate);
+    if (effectiveToDate && effectiveToDate < effectiveDate) {
+      alert('Effective upto date cannot be before effective from date');
+      return;
+    }
+    onAssign(selectedShift, effectiveDate, effectiveToDate || undefined);
   };
 
   if (!isOpen) return null;
@@ -361,18 +378,37 @@ const AssignShiftModal: React.FC<AssignShiftModalProps> = ({
         </div>
 
         <div className="p-6 space-y-4">
-          {/* Effective Date */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Effective From
-            </label>
-            <input
-              type="date"
-              value={effectiveDate}
-              onChange={(e) => setEffectiveDate(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-              min={new Date().toISOString().split('T')[0]}
-            />
+          {/* Effective Dates */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Effective From
+              </label>
+              <input
+                type="date"
+                value={effectiveDate}
+                onChange={(e) => {
+                  setEffectiveDate(e.target.value);
+                  if (effectiveToDate && effectiveToDate < e.target.value) {
+                    setEffectiveToDate('');
+                  }
+                }}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                min={new Date().toISOString().split('T')[0]}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Effective Upto
+              </label>
+              <input
+                type="date"
+                value={effectiveToDate}
+                onChange={(e) => setEffectiveToDate(e.target.value)}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                min={effectiveDate}
+              />
+            </div>
           </div>
 
           {/* Shift Selection */}

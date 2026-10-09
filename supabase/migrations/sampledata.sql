@@ -354,7 +354,7 @@ select
     'holidays',jsonb_build_array('2026-02-05'),
     'hydration_rules',jsonb_build_object('mark_absent_if_no_punch',true,'auto_holiday_from_calendar',true)
   ),
-  'claude-3.5-haiku',
+  'claude-haiku-4-5',
   0.91,
   cfg.admin_user_id,
   cfg.admin_user_id,

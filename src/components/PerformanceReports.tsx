@@ -76,6 +76,7 @@ const PerformanceReports: React.FC = () => {
           .from('users')
           .select('id, name, department')
           .eq('organization_id', currentUserData.organization_id)
+          .eq('is_active', true)
           .order('name');
         
         if (usersData) {

@@ -304,7 +304,7 @@ export async function testWhatsAppConnectivity(): Promise<{ success: boolean; er
     const testMessage = {
       phoneNumber: '+919909249725', // Your test number
       message: `🧪 WhatsApp Integration Test\n\nTimestamp: ${new Date().toISOString()}\n\n✅ System is working correctly!`,
-      patientName: 'Test Patient',
+      patientName: 'Test Contact',
       testName: 'Connectivity Test',
       doctorName: 'System Admin'
     };

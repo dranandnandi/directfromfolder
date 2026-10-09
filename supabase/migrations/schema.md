@@ -327,6 +327,7 @@ CREATE TABLE public.organizations (
   location_longitude numeric CHECK (location_longitude IS NULL OR location_longitude >= '-180'::integer::numeric AND location_longitude <= 180::numeric),
   location_address text,
   geofence_settings jsonb DEFAULT '{"enabled": true, "enforcement_mode": "strict", "allow_admin_override": true, "distance_threshold_meters": 500}'::jsonb,
+  leave_policy jsonb NOT NULL DEFAULT '{"year_start_month": 4, "types": [{"code": "SL", "name": "Sick Leave", "annual_quota": 0}, {"code": "CL", "name": "Casual Leave", "annual_quota": 0}]}'::jsonb,
   CONSTRAINT organizations_pkey PRIMARY KEY (id),
   CONSTRAINT organizations_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES public.users(id)
 );

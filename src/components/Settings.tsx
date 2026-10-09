@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import { HiUser, HiOfficeBuilding, HiBell, HiLocationMarker/*, HiChat*/ } from 'react-icons/hi';
+import { HiUser, HiOfficeBuilding, HiBell, HiLocationMarker, HiChat, HiCalendar } from 'react-icons/hi';
 import OrganizationSettingsForm from './OrganizationSettingsForm';
+import DepartmentSettings from './DepartmentSettings';
 import NotificationSettings from './NotificationSettings';
 import GeofenceSettings from './GeofenceSettings';
-// import WhatsAppSettingsForm from './WhatsAppSettingsForm'; // Temporarily hidden
+import LeavePolicySettings from './LeavePolicySettings';
+import WhatsAppSettingsForm from './WhatsAppSettingsForm';
 import { OrganizationSettings } from '../models/task';
 import { supabase } from '../utils/supabaseClient';
 
@@ -14,11 +16,11 @@ const isValidUUID = (uuid: string): boolean => {
 };
 
 const Settings = () => {
-  const [activeTab, setActiveTab] = useState<'organization' | 'geofence' | 'profile' | 'notifications'/* | 'whatsapp'*/>('organization');
+  const [activeTab, setActiveTab] = useState<'organization' | 'geofence' | 'leave' | 'profile' | 'notifications' | 'whatsapp'>('organization');
   const [organizationSettings, setOrganizationSettings] = useState<OrganizationSettings>({
     id: '', // Will be updated with the actual organization ID
     organizationId: '', // Will be updated with the actual organization ID
-    name: 'Clinic Task Manager', // Default name
+    name: 'Staff Management Solution', // Default name
     advisoryTypes: [], // Placeholder
     roundTypes: [], // Placeholder
     followUpTypes: [], // Placeholder
@@ -68,7 +70,7 @@ const Settings = () => {
       setOrganizationSettings({
         id: orgData.id,
         organizationId: orgData.id,
-        name: orgData.name || 'Clinic Task Manager',
+        name: orgData.name || 'Staff Management Solution',
         advisoryTypes: orgData.advisory_types || [],
         roundTypes: orgData.round_types || [],
         followUpTypes: orgData.follow_up_types || [],
@@ -170,6 +172,17 @@ const Settings = () => {
             Geofence
           </button>
           <button
+            onClick={() => setActiveTab('leave')}
+            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'leave'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            <HiCalendar className="w-5 h-5 inline mr-2" />
+            Leave
+          </button>
+          <button
             onClick={() => setActiveTab('notifications')}
             className={`py-2 px-1 border-b-2 font-medium text-sm ${
               activeTab === 'notifications'
@@ -180,8 +193,7 @@ const Settings = () => {
             <HiBell className="w-5 h-5 inline mr-2" />
             Notifications
           </button>
-          {/* WhatsApp tab temporarily hidden */}
-          {/* <button
+          <button
             onClick={() => setActiveTab('whatsapp')}
             className={`py-2 px-1 border-b-2 font-medium text-sm ${
               activeTab === 'whatsapp'
@@ -191,7 +203,7 @@ const Settings = () => {
           >
             <HiChat className="w-5 h-5 inline mr-2" />
             WhatsApp
-          </button> */}
+          </button>
           <button
             onClick={() => setActiveTab('profile')}
             className={`py-2 px-1 border-b-2 font-medium text-sm ${
@@ -218,6 +230,10 @@ const Settings = () => {
               organizationSettings={organizationSettings}
               onUpdate={handleUpdateSettings}
             />
+
+            <div className="mt-8 pt-6 border-t">
+              <DepartmentSettings organizationId={organizationSettings.id} />
+            </div>
           </div>
         )}
 
@@ -232,6 +248,17 @@ const Settings = () => {
           </div>
         )}
 
+        {/* Leave Policy */}
+        {activeTab === 'leave' && (
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            <h3 className="text-lg font-medium mb-4 flex items-center gap-2">
+              <HiCalendar className="w-5 h-5 text-gray-500" />
+              Leave Policy
+            </h3>
+            <LeavePolicySettings organizationId={organizationSettings.id} />
+          </div>
+        )}
+
         {/* Notification Settings */}
         {activeTab === 'notifications' && (
           <div className="bg-white rounded-lg shadow-sm p-6">
@@ -243,8 +270,8 @@ const Settings = () => {
           </div>
         )}
 
-        {/* WhatsApp Settings - temporarily hidden */}
-        {/* {activeTab === 'whatsapp' && (
+        {/* WhatsApp Settings */}
+        {activeTab === 'whatsapp' && (
           <div className="bg-white rounded-lg shadow-sm p-6">
             <h3 className="text-lg font-medium mb-4 flex items-center gap-2">
               <HiChat className="w-5 h-5 text-green-500" />
@@ -252,7 +279,7 @@ const Settings = () => {
             </h3>
             <WhatsAppSettingsForm />
           </div>
-        )} */}
+        )}
 
         {/* Profile Settings */}
         {activeTab === 'profile' && (

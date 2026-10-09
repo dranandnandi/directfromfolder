@@ -6,7 +6,9 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-function buildMap(available: { code: string }[]) {
+type AvailableComponent = { code: string; type?: "earning" | "deduction" | "employer_cost" };
+
+function buildMap(available: AvailableComponent[]) {
   const allowed = new Set<string>();
   const map: Record<string, string> = {};
   
@@ -37,8 +39,9 @@ function buildMap(available: { code: string }[]) {
   return { allowed, map };
 }
 
-function finalize(components: { component_code: string; amount: number }[], available: { code: string }[]) {
+function finalize(components: { component_code: string; amount: number }[], available: AvailableComponent[]) {
   const { allowed, map } = buildMap(available);
+  const typeByCode = new Map(available.map((component) => [component.code, component.type]));
   const acc = new Map<string, number>();
   const unmapped: { raw_code: string; amount: number }[] = [];
 
@@ -51,7 +54,11 @@ function finalize(components: { component_code: string; amount: number }[], avai
       continue; 
     }
     
-    const amt = Number(l.amount) || 0; // keep signs and values as-is
+    let amt = Number(l.amount) || 0;
+    const type = typeByCode.get(code);
+    if (type === "deduction" && amt > 0) amt = -amt;
+    if (type !== "deduction" && amt < 0) amt = Math.abs(amt);
+
     acc.set(code, (acc.get(code) || 0) + amt);
   }
 

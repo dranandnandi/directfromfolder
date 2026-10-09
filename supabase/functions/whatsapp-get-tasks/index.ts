@@ -37,6 +37,19 @@ serve(async (req) => {
       )
     }
 
+    const { data: requester, error: requesterError } = await supabaseClient
+      .from('users')
+      .select('id, organization_id, is_active')
+      .eq('id', userId)
+      .single()
+
+    if (requesterError || !requester || requester.organization_id !== organizationId || requester.is_active === false) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'User not found' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 }
+      )
+    }
+
     // Build query - fetch raw columns (no joins, avoids PostgREST FK cache issues)
     let query = supabaseClient
       .from('tasks')
@@ -84,6 +97,7 @@ serve(async (req) => {
         .from('users')
         .select('id, name')
         .in('id', Array.from(userIds))
+        .eq('is_active', true)
       if (users) {
         for (const u of users) {
           userMap[u.id] = u.name
@@ -91,8 +105,13 @@ serve(async (req) => {
       }
     }
 
+    const visibleTasks = (tasks || []).filter(task =>
+      (!task.assigned_to || userMap[task.assigned_to]) &&
+      (!task.created_by || userMap[task.created_by])
+    )
+
     // Format tasks for WhatsApp-friendly display
-    const formattedTasks = tasks.map(task => ({
+    const formattedTasks = visibleTasks.map(task => ({
       id: task.id,
       title: task.title,
       description: task.description,

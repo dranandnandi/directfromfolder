@@ -11,10 +11,79 @@ interface CreateUserRequest {
   password: string;
   name: string;
   whatsappNumber: string;
-  phone?: string;
+  phone: string;
   role: 'user' | 'admin' | 'superadmin';
   department: string;
   organizationId: string;
+}
+
+function errorResponse(status: number, code: string, message: string, details?: string[]) {
+  return new Response(
+    JSON.stringify({
+      success: false,
+      error: message,
+      code,
+      details
+    }),
+    {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status,
+    }
+  );
+}
+
+function mapAuthCreateError(error: { message?: string; status?: number; code?: string }) {
+  const rawMessage = error.message || 'Failed to create auth user';
+  const normalizedMessage = rawMessage.toLowerCase();
+
+  if (
+    normalizedMessage.includes('already registered') ||
+    normalizedMessage.includes('already been registered') ||
+    normalizedMessage.includes('user already registered') ||
+    normalizedMessage.includes('duplicate')
+  ) {
+    return {
+      status: 409,
+      code: 'EMAIL_ALREADY_EXISTS',
+      message: 'This email address is already in use.'
+    };
+  }
+
+  if (normalizedMessage.includes('password')) {
+    return {
+      status: 400,
+      code: 'INVALID_PASSWORD',
+      message: rawMessage
+    };
+  }
+
+  if (normalizedMessage.includes('email')) {
+    return {
+      status: 400,
+      code: 'INVALID_EMAIL',
+      message: rawMessage
+    };
+  }
+
+  return {
+    status: error.status || 500,
+    code: error.code || 'AUTH_CREATE_FAILED',
+    message: rawMessage
+  };
+}
+
+async function findAuthUserByEmail(supabaseAdmin: any, email: string) {
+  const { data, error } = await supabaseAdmin.rpc('get_unused_auth_users');
+
+  if (error) {
+    return { user: null, error };
+  }
+
+  const matchingUser = (data ?? []).find(
+    (authUser: { email?: string }) => authUser.email?.trim().toLowerCase() === email
+  );
+
+  return { user: matchingUser ?? null, error: null };
 }
 
 serve(async (req) => {
@@ -27,7 +96,7 @@ serve(async (req) => {
     // Get the authorization header
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
-      throw new Error('Missing authorization header');
+      return errorResponse(401, 'MISSING_AUTH_HEADER', 'Missing authorization header');
     }
 
     // Extract JWT token from Bearer header
@@ -49,7 +118,7 @@ serve(async (req) => {
     const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
     if (authError || !user) {
       console.error('Auth error:', authError);
-      throw new Error('Unauthorized: Invalid or expired token');
+      return errorResponse(401, 'UNAUTHORIZED', 'Invalid or expired session. Please log in again.');
     }
 
     // Verify the requesting user is an admin in their organization
@@ -60,36 +129,48 @@ serve(async (req) => {
       .single();
 
     if (adminCheckError || !adminUser) {
-      throw new Error('User not found in database');
+      return errorResponse(404, 'ADMIN_USER_NOT_FOUND', 'Your admin user record was not found.');
     }
 
     if (!['admin', 'superadmin'].includes(adminUser.role)) {
-      throw new Error('Forbidden: Only admins can create users');
+      return errorResponse(403, 'INSUFFICIENT_PERMISSIONS', 'Only admins can create users.');
     }
 
     // Parse request body
     const requestBody: CreateUserRequest = await req.json();
     const { email, password, name, whatsappNumber, phone, role, department, organizationId } = requestBody;
+    const normalizedPhone = phone?.trim() ?? '';
 
     // Validate that admin is creating user in their own organization
     if (adminUser.organization_id !== organizationId) {
-      throw new Error('Forbidden: Cannot create users in other organizations');
+      return errorResponse(403, 'ORGANIZATION_MISMATCH', 'You can only create users in your own organization.');
     }
 
     // Validate required fields
-    if (!email || !password || !name || !whatsappNumber || !role || !department || !organizationId) {
-      throw new Error('Missing required fields');
+    if (!email || !password || !name || !whatsappNumber || !normalizedPhone || !role || !department || !organizationId) {
+      return errorResponse(400, 'MISSING_REQUIRED_FIELDS', 'Please fill in all required fields.', [
+        'Full name is required',
+        'Email is required',
+        'Password is required',
+        'WhatsApp number is required',
+        'Phone number is required',
+        'Department is required'
+      ]);
     }
 
     // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      throw new Error('Invalid email format');
+      return errorResponse(400, 'INVALID_EMAIL_FORMAT', 'Please enter a valid email address.');
+    }
+
+    if (!/^\+?\d{7,15}$/.test(normalizedPhone)) {
+      return errorResponse(400, 'INVALID_PHONE_NUMBER', 'Phone number must contain only digits and be 7 to 15 digits long.');
     }
 
     // Validate password length
     if (password.length < 6) {
-      throw new Error('Password must be at least 6 characters');
+      return errorResponse(400, 'WEAK_PASSWORD', 'Password must be at least 6 characters.');
     }
 
     // Validate and format WhatsApp number
@@ -104,22 +185,34 @@ serve(async (req) => {
       } else if (cleanedWhatsApp.length === 9) {
         formattedWhatsApp = `+971${cleanedWhatsApp}`;
       } else {
-        throw new Error('WhatsApp number must be 10 digits (India) or 9 digits (UAE)');
+        return errorResponse(400, 'INVALID_WHATSAPP_NUMBER', 'WhatsApp number must be 10 digits for India or 9 digits for UAE.');
       }
     } else {
       // Already has country code, validate format
       const match = whatsappNumber.match(/^\+(\d{1,4})(\d+)$/);
       if (!match) {
-        throw new Error('Invalid WhatsApp number format');
+        return errorResponse(400, 'INVALID_WHATSAPP_NUMBER', 'Please enter a valid WhatsApp number with country code.');
       }
       const countryCode = match[1];
       const number = match[2];
       
       if (countryCode === '91' && number.length !== 10) {
-        throw new Error('Indian WhatsApp number must be 10 digits');
+        return errorResponse(400, 'INVALID_WHATSAPP_NUMBER', 'Indian WhatsApp number must be exactly 10 digits.');
       } else if (countryCode === '971' && number.length !== 9) {
-        throw new Error('UAE WhatsApp number must be 9 digits');
+        return errorResponse(400, 'INVALID_WHATSAPP_NUMBER', 'UAE WhatsApp number must be exactly 9 digits.');
       }
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const { data: existingUser } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
+
+    if (existingUser) {
+      return errorResponse(409, 'EMAIL_ALREADY_EXISTS', 'This email address is already in use.');
     }
 
     // Title case the name
@@ -129,38 +222,91 @@ serve(async (req) => {
       .map(word => word.charAt(0).toUpperCase() + word.slice(1))
       .join(' ');
 
-    console.log('Creating auth user for:', email);
+    console.log('Creating auth user for:', normalizedEmail);
 
     // Step 1: Create user in Supabase Auth
     const { data: authData, error: authCreateError } = await supabaseAdmin.auth.admin.createUser({
-      email,
+      email: normalizedEmail,
       password,
       email_confirm: true, // Auto-confirm email
       user_metadata: {
         name: titleCaseName,
-        role: role
+        role: role,
+        phone: normalizedPhone
       }
     });
 
+    let authUser = authData.user;
+    let createdAuthUser = false;
+
     if (authCreateError) {
       console.error('Auth user creation error:', authCreateError);
-      throw new Error(`Failed to create auth user: ${authCreateError.message}`);
+      const mappedError = mapAuthCreateError(authCreateError);
+
+      if (mappedError.code !== 'EMAIL_ALREADY_EXISTS') {
+        return errorResponse(mappedError.status, mappedError.code, mappedError.message);
+      }
+
+      console.log('Auth user already exists; checking for a missing public profile:', normalizedEmail);
+      const { user: existingAuthUser, error: authLookupError } = await findAuthUserByEmail(
+        supabaseAdmin,
+        normalizedEmail
+      );
+
+      if (authLookupError) {
+        console.error('Existing auth user lookup failed:', authLookupError);
+        return errorResponse(
+          500,
+          'AUTH_LOOKUP_FAILED',
+          'The login account exists, but it could not be loaded to create the user profile.'
+        );
+      }
+
+      if (!existingAuthUser) {
+        return errorResponse(mappedError.status, mappedError.code, mappedError.message);
+      }
+
+      const { data: linkedProfile, error: linkedProfileError } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .eq('auth_id', existingAuthUser.id)
+        .maybeSingle();
+
+      if (linkedProfileError) {
+        console.error('Existing auth profile check failed:', linkedProfileError);
+        return errorResponse(
+          500,
+          'PROFILE_LOOKUP_FAILED',
+          'The login account exists, but its user profile could not be checked.'
+        );
+      }
+
+      if (linkedProfile) {
+        return errorResponse(409, 'EMAIL_ALREADY_EXISTS', 'This email address is already in use.');
+      }
+
+      authUser = existingAuthUser;
+    } else {
+      createdAuthUser = true;
     }
 
-    if (!authData.user) {
-      throw new Error('No user data returned from auth creation');
+    if (!authUser) {
+      return errorResponse(500, 'AUTH_CREATE_FAILED', 'No user data was returned while creating the login account.');
     }
 
-    console.log('Auth user created successfully:', authData.user.id);
+    console.log(
+      createdAuthUser ? 'Auth user created successfully:' : 'Reusing existing auth user:',
+      authUser.id
+    );
 
     // Step 2: Create user profile in public.users table
     const profileData = {
-      auth_id: authData.user.id,
+      auth_id: authUser.id,
       organization_id: organizationId,
       name: titleCaseName,
-      email: email,
+      email: normalizedEmail,
       whatsapp_number: formattedWhatsApp,
-      phone: phone || null,
+      phone: normalizedPhone,
       role: role,
       department: department,
       onboarding_state: 'completed',
@@ -183,16 +329,22 @@ serve(async (req) => {
       console.error('Profile error message:', profileError.message);
       console.error('Profile error hint:', profileError.hint);
       
-      // Cleanup: Delete auth user if profile creation fails
-      console.log('Cleaning up auth user due to profile creation failure...');
-      try {
-        await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
-        console.log('Auth user cleanup successful');
-      } catch (cleanupError) {
-        console.error('Failed to cleanup auth user:', cleanupError);
+      // Only roll back an auth account created by this request.
+      if (createdAuthUser) {
+        console.log('Cleaning up auth user due to profile creation failure...');
+        try {
+          await supabaseAdmin.auth.admin.deleteUser(authUser.id);
+          console.log('Auth user cleanup successful');
+        } catch (cleanupError) {
+          console.error('Failed to cleanup auth user:', cleanupError);
+        }
       }
       
-      throw new Error(`Failed to create user profile: ${profileError.message}`);
+      if (profileError.code === '23505') {
+        return errorResponse(409, 'USER_ALREADY_EXISTS', 'A user with this email or phone already exists.');
+      }
+
+      return errorResponse(500, 'PROFILE_CREATE_FAILED', `Failed to create user profile: ${profileError.message}`);
     }
 
     console.log('User profile created successfully:', profileResult.id);
@@ -214,7 +366,9 @@ serve(async (req) => {
           created_at: profileResult.created_at,
           updated_at: profileResult.updated_at
         },
-        message: 'User created successfully'
+        message: createdAuthUser
+          ? 'User created successfully'
+          : 'Existing login account linked to a new user profile successfully'
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -224,19 +378,6 @@ serve(async (req) => {
 
   } catch (error: any) {
     console.error('Error in create-user function:', error);
-    
-    return new Response(
-      JSON.stringify({
-        success: false,
-        error: error.message || 'An unexpected error occurred'
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: error.message.includes('Unauthorized') ? 401 :
-               error.message.includes('Forbidden') ? 403 :
-               error.message.includes('Missing required fields') || 
-               error.message.includes('Invalid') ? 400 : 500,
-      }
-    );
+    return errorResponse(500, 'UNEXPECTED_ERROR', error.message || 'An unexpected error occurred while creating the user.');
   }
 });

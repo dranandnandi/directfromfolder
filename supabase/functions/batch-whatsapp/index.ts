@@ -122,8 +122,11 @@ serve(async (req) => {
 
       try {
         // Get organization ID and check whatsapp_enabled (CHECK 1)
-        const organizationId = notification.users?.organization_id;
-        const whatsappEnabled = notification.organizations?.whatsapp_enabled;
+        const userRecord = Array.isArray(notification.users) ? notification.users[0] : notification.users;
+        const orgRecord: any = Array.isArray(notification.organizations) ? notification.organizations[0] : notification.organizations;
+        const nestedOrgRecord = Array.isArray(orgRecord?.organizations) ? orgRecord.organizations[0] : orgRecord?.organizations;
+        const organizationId = userRecord?.organization_id || nestedOrgRecord?.id;
+        const whatsappEnabled = nestedOrgRecord?.whatsapp_enabled ?? orgRecord?.whatsapp_enabled;
 
         if (!organizationId) {
           console.log(`Notification ${notification.id} has no organization, skipping`);
@@ -146,6 +149,7 @@ serve(async (req) => {
           phoneNumber: formattedPhone,
           message: notification.ai_generated_message,
           organizationId: organizationId,
+          userId: notification.user_id,
           notificationId: notification.id,
           title: notification.title,
           type: 'batch-notification'

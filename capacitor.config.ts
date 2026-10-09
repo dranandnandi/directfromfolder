@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.dcptaskmanagmentapp.taskmanager',
-  appName: 'DCP Task Manager',
+  appName: 'Staff Management',
   webDir: 'dist',
   server: {
     androidScheme: 'https'

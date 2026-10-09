@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { HiX, HiOfficeBuilding, HiChartBar, HiCog, HiQuestionMarkCircle, HiUserGroup, HiTrash, HiRefresh, HiUsers, HiCalendar, HiClock, HiCurrencyDollar, HiDocument, HiLightningBolt } from 'react-icons/hi';
+import { HiX, HiOfficeBuilding, HiChartBar, HiCog, HiQuestionMarkCircle, HiUserGroup, HiTrash, HiRefresh, HiUsers, HiCalendar, HiClock, HiCurrencyDollar, HiDocument, HiLightningBolt, HiQrcode } from 'react-icons/hi';
 import { supabase } from '../utils/supabaseClient';
 import { OrganizationSettings } from '../models/task';
 import dcpLogo from '/notification-icon.svg';
@@ -192,6 +192,14 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
               onNavigate={onClose}
             >
               Leave Management
+            </MenuItem>
+            <MenuItem
+              icon={HiQrcode}
+              to="/whatsapp-connection"
+              active={activeView === 'whatsapp-connection'}
+              onNavigate={onClose}
+            >
+              WhatsApp Connection
             </MenuItem>
             <MenuItem 
               icon={HiCurrencyDollar}

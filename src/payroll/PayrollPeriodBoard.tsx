@@ -3,6 +3,7 @@ import { PayrollContext } from "./PayrollShell";
 import { supabase } from "../utils/supabaseClient";
 import { useOrganization } from "../contexts/OrganizationContext";
 import { callEdge } from "../lib/edgeClient";
+import { payslipPdfService } from "../services/payslipPdfService";
 
 /* ================================================================
    Types
@@ -127,6 +128,8 @@ export default function PayrollPeriodBoard() {
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"all" | "processed" | "pending" | "no-comp">("all");
   const [ptState, setPtState] = useState("GJ");
+  const [pdfLoading, setPdfLoading] = useState<Record<string, boolean>>({});
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   const daysInMonth = new Date(year, month, 0).getDate();
   // Working days = calendar days minus Sundays (many Indian orgs work 6 days)
@@ -270,6 +273,23 @@ export default function PayrollPeriodBoard() {
     );
   };
 
+  /* ---- Generate payslip PDF on demand ---- */
+  const handlePayslip = async (emp: EmployeeRow) => {
+    if (!emp.run) return;
+    setPdfError(null);
+    setPdfLoading((prev) => ({ ...prev, [emp.id]: true }));
+    try {
+      const url = await payslipPdfService.generatePayslipPdf(emp.run.id);
+      window.open(url, "_blank");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to generate payslip";
+      setPdfError(msg);
+      console.error("[PeriodBoard] payslip error", err);
+    } finally {
+      setPdfLoading((prev) => ({ ...prev, [emp.id]: false }));
+    }
+  };
+
   /* ---- Bulk run all pending ---- */
   const runAll = async () => {
     if (!period) return;
@@ -355,6 +375,17 @@ export default function PayrollPeriodBoard() {
 
   return (
     <div className="space-y-6">
+      {/* ---- PDF Error Banner ---- */}
+      {pdfError && (
+        <div className="flex items-start gap-3 bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm">
+          <span className="text-red-500 mt-0.5">⚠️</span>
+          <span className="flex-1"><strong>Payslip generation failed:</strong> {pdfError}</span>
+          <button
+            onClick={() => setPdfError(null)}
+            className="text-red-400 hover:text-red-600 text-lg leading-none"
+          >×</button>
+        </div>
+      )}
       {/* ---- Hero Header ---- */}
       <div className="bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-500 rounded-2xl p-6 text-white">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -520,7 +551,7 @@ export default function PayrollPeriodBoard() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                <th className="px-4 py-3">Employee</th>
+            <th className="px-4 py-3">Employee</th>
                 <th className="px-4 py-3">Department</th>
                 <th className="px-4 py-3 text-right">CTC/Month</th>
                 <th className="px-4 py-3 text-center">Present Days</th>
@@ -529,6 +560,7 @@ export default function PayrollPeriodBoard() {
                 <th className="px-4 py-3 text-right">Deductions</th>
                 <th className="px-4 py-3 text-right">Net Pay</th>
                 <th className="px-4 py-3 text-center">Action</th>
+                <th className="px-4 py-3 text-center">Payslip</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -633,6 +665,31 @@ export default function PayrollPeriodBoard() {
                         <span className="text-xs text-gray-400 italic">No comp</span>
                       )}
                     </td>
+                    {/* ---- Payslip PDF button ---- */}
+                    <td className="px-4 py-3 text-center">
+                      {emp.run ? (
+                        <button
+                          onClick={() => handlePayslip(emp)}
+                          disabled={!!pdfLoading[emp.id]}
+                          title="Generate & download payslip PDF"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-100 transition disabled:opacity-50 disabled:cursor-wait"
+                        >
+                          {pdfLoading[emp.id] ? (
+                            <>
+                              <span className="w-3 h-3 border-2 border-indigo-400/40 border-t-indigo-600 rounded-full animate-spin" />
+                              Generating...
+                            </>
+                          ) : (
+                            <>
+                              <span>📄</span>
+                              Payslip
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-gray-300 italic">—</span>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -646,6 +703,7 @@ export default function PayrollPeriodBoard() {
                   <td className="px-4 py-3 text-right font-mono">{money(totalGross)}</td>
                   <td className="px-4 py-3 text-right font-mono">{money(totalDeductions)}</td>
                   <td className="px-4 py-3 text-right font-mono">{money(totalNet)}</td>
+                  <td />
                   <td />
                 </tr>
               </tfoot>

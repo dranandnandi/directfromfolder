@@ -8,7 +8,8 @@ export interface User {
 
 export enum TaskType {
   RegularTask = 'regularTask',
-  PatientTracking = 'patientTracking', 
+  // Value stays 'patientTracking' for compatibility with existing rows in tasks.type
+  ClientTracking = 'patientTracking',
   AuditTask = 'auditTask',
   PersonalTask = 'personalTask'
 }

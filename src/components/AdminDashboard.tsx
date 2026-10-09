@@ -18,6 +18,7 @@ import {
   HiFolder
 } from 'react-icons/hi';
 import { supabase } from '../utils/supabaseClient';
+import { useOrgDepartments } from '../hooks/useOrgDepartments';
 import WhatsAppAdminPanel from './WhatsAppAdminPanel';
 import { sendWhatsAppMessage } from '../utils/whatsappUtils';
 import AttendanceDashboard from './hr/AttendanceDashboard';
@@ -107,6 +108,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [loading, setLoading] = useState(true);
   const [selectedTimeframe, setSelectedTimeframe] = useState<'7d' | '30d' | '90d'>('30d');
   const [selectedDepartment, setSelectedDepartment] = useState('all');
+  const { departments: orgDepartments } = useOrgDepartments();
   const [searchTerm, setSearchTerm] = useState('');
   const [leaveFilter, setLeaveFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [viewingReasonId, setViewingReasonId] = useState<string | null>(null);
@@ -226,7 +228,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           last_active_at
         `)
         .eq('organization_id', adminOrganizationId) // ENFORCED ORGANIZATION FILTERING
-        .eq('role', 'user'); // Changed from 'employee' to 'user'
+        .eq('role', 'user') // Changed from 'employee' to 'user'
+        .eq('is_active', true);
 
       if (selectedDepartment !== 'all') {
         query = query.eq('department', selectedDepartment);
@@ -381,7 +384,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           due_date,
           created_at,
           completed_at,
-          users!assigned_to(name, department, organization_id)
+          users!assigned_to(name, department, organization_id, is_active)
         `)
         .eq('type', 'personalTask')
         .ilike('title', '%Leave Request%') // Filter by title to identify leave requests
@@ -392,7 +395,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       // Filter to only include employees from admin's organization
       const filteredLeaveData = (leaveData || []).filter(leave => {
         const user = Array.isArray(leave.users) ? leave.users[0] : leave.users;
-        return user && user.organization_id === adminOrganizationId;
+        return user && user.organization_id === adminOrganizationId && user.is_active !== false;
       });
 
       const formattedLeaves: LeaveRequest[] = filteredLeaveData.map(leave => {
@@ -452,6 +455,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         .from('users')
         .select('whatsapp_number, name')
         .eq('id', leave.employee_id)
+        .eq('is_active', true)
         .single();
 
       if (employeeError || !employeeData) {
@@ -514,6 +518,7 @@ Thank you for keeping us informed.`;
         .from('users')
         .select('whatsapp_number, name')
         .eq('id', leave.employee_id)
+        .eq('is_active', true)
         .single();
 
       if (employeeError || !employeeData) {
@@ -696,11 +701,9 @@ Thank you for keeping us informed.`;
             className="border border-gray-300 rounded-md px-3 py-1 text-sm"
           >
             <option value="all">All Departments</option>
-            <option value="Reception">Reception</option>
-            <option value="Laboratory">Laboratory</option>
-            <option value="Radiology">Radiology</option>
-            <option value="Pathology">Pathology</option>
-            <option value="Administration">Administration</option>
+            {orgDepartments.map(dept => (
+              <option key={dept} value={dept}>{dept}</option>
+            ))}
           </select>
 
           <div className="flex items-center gap-2">

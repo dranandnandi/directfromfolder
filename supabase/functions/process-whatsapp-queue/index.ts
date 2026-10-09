@@ -67,7 +67,7 @@ serve(async (req) => {
 
     // Get pending notifications from the queue
     const { data: pendingNotifications, error: fetchError } = await supabase
-      .rpc('get_pending_whatsapp_notifications', { batch_size: batchSize });
+      .rpc('get_pending_whatsapp_notifications', { limit_count: batchSize });
 
     if (fetchError) {
       console.error('Error fetching pending notifications:', fetchError);
@@ -124,11 +124,13 @@ serve(async (req) => {
         result.errors.push(`Notification ${notification.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
         
         // Mark as failed in database
-        await supabase.rpc('mark_whatsapp_notification_status', {
-          notification_id: notification.id,
-          success: false,
-          error_message: error instanceof Error ? error.message : 'Unknown error'
-        });
+        await supabase
+        .from('notifications')
+        .update({
+          whatsapp_sent: false,
+          processing_status: 'failed'
+        })
+        .eq('id', notification.id);
       }
     }
 
@@ -168,28 +170,32 @@ async function processWhatsAppNotification(notification: any, supabase: any): Pr
     
     if (!organizationId) {
       console.log(`Notification ${notification.id} has no organization_id, skipping`);
-      await supabase.rpc('mark_whatsapp_notification_status', {
-        notification_id: notification.id,
-        success: false,
-        error_message: 'Missing organization_id'
-      });
+      await supabase
+        .from('notifications')
+        .update({
+          whatsapp_sent: false,
+          processing_status: 'failed'
+        })
+        .eq('id', notification.id);
       return false;
     }
 
     // Check if org has whatsapp_enabled (CHECK 1)
     const { data: org } = await supabase
       .from('organizations')
-      .select('id, whatsapp_enabled')
+      .select('id, whatsapp_enabled, whatsapp_api_endpoint')
       .eq('id', organizationId)
       .single();
 
     if (!org?.whatsapp_enabled) {
       console.log(`Org ${organizationId} has whatsapp_enabled=false, skipping notification ${notification.id}`);
-      await supabase.rpc('mark_whatsapp_notification_status', {
-        notification_id: notification.id,
-        success: false,
-        error_message: 'WhatsApp disabled for organization'
-      });
+      await supabase
+        .from('notifications')
+        .update({
+          whatsapp_sent: false,
+          processing_status: 'failed'
+        })
+        .eq('id', notification.id);
       return false;
     }
 
@@ -201,14 +207,20 @@ async function processWhatsAppNotification(notification: any, supabase: any): Pr
       phoneNumber: formattedPhone,
       message: notification.ai_generated_message,
       organizationId: organizationId,  // Required for HR admin check (CHECK 2)
+      userId: notification.user_id,
       notificationId: notification.id,
       type: 'queue-notification'
     };
 
-    console.log(`Sending WhatsApp to ${formattedPhone} for notification ${notification.id}, org ${organizationId}`);
+    // Route through the organization's own bridge when it has one, matching
+    // send-whatsapp. Sessions are per-deployment, so the wrong host means the
+    // message is accepted nowhere.
+    const effectiveApiUrl = org.whatsapp_api_endpoint || WHATSAPP_API_URL;
+
+    console.log(`Sending WhatsApp to ${formattedPhone} for notification ${notification.id}, org ${organizationId}, api ${effectiveApiUrl}`);
 
     // Send message to WhatsApp API with API key
-    const whatsappResponse = await fetch(WHATSAPP_API_URL, {
+    const whatsappResponse = await fetch(effectiveApiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -223,21 +235,33 @@ async function processWhatsAppNotification(notification: any, supabase: any): Pr
       console.error('WhatsApp API error for notification', notification.id, ':', whatsappResult);
       
       // Mark as failed
-      await supabase.rpc('mark_whatsapp_notification_status', {
-        notification_id: notification.id,
-        success: false,
-        error_message: whatsappResult.error || 'API request failed'
-      });
+      await supabase
+        .from('notifications')
+        .update({
+          whatsapp_sent: false,
+          processing_status: 'failed'
+        })
+        .eq('id', notification.id);
       
       return false;
     }
 
-    // Mark as successful
-    await supabase.rpc('mark_whatsapp_notification_status', {
-      notification_id: notification.id,
-      success: true,
-      error_message: null
-    });
+    // Mark as successful. Written directly rather than through the RPC: a
+    // silent RPC failure here means the row stays whatsapp_sent = false and the
+    // next cron run sends the same message again.
+    const { error: markError } = await supabase
+      .from('notifications')
+      .update({
+        whatsapp_sent: true,
+        whatsapp_sent_at: new Date().toISOString(),
+        processing_status: 'completed'
+      })
+      .eq('id', notification.id);
+
+    if (markError) {
+      console.error(`SENT BUT NOT MARKED - notification ${notification.id} will resend:`, markError);
+      throw new Error(`Delivered but failed to mark sent: ${markError.message}`);
+    }
 
     console.log(`WhatsApp sent successfully for notification ${notification.id}`);
     return true;
@@ -248,29 +272,27 @@ async function processWhatsAppNotification(notification: any, supabase: any): Pr
   }
 }
 
+// Kept identical to send-whatsapp's formatPhoneNumber so both senders hand the
+// bridge the same E.164 string. Stripping the country code here previously made
+// the two paths disagree on what a phone number looks like.
 function formatPhoneForAPI(phone: string): string {
-  // Remove all non-digit characters
-  let cleaned = phone.replace(/\D/g, '');
-  
-  // Remove country code (91) if present to get 10-digit number for API
-  if (cleaned.startsWith('91') && cleaned.length === 12) {
-    return cleaned.substring(2);
+  const cleaned = phone.replace(/\D/g, '');
+
+  if (cleaned.startsWith('91')) {
+    return '+' + cleaned;
   }
-  
-  // If it starts with 0, remove it
+
   if (cleaned.startsWith('0')) {
-    return cleaned.substring(1);
+    return '+91' + cleaned.substring(1);
   }
-  
-  // Return 10-digit number
+
   if (cleaned.length === 10) {
-    return cleaned;
+    return '+91' + cleaned;
   }
-  
-  // If longer than 10, take last 10 digits
-  if (cleaned.length > 10) {
-    return cleaned.slice(-10);
+
+  if (!phone.startsWith('+')) {
+    return '+' + cleaned;
   }
-  
-  return cleaned;
+
+  return phone;
 }

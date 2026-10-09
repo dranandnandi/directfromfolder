@@ -1,5 +1,14 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
+import {
+  computeLeaveBalances,
+  findLeaveType,
+  formatBalance,
+  getLeaveYear,
+  leaveDaysForRequest,
+  parseLeavePolicy,
+  parseLeaveTaskDescription
+} from '../_shared/leavePolicy.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -10,6 +19,7 @@ interface RequestLeaveInput {
   userId: string;           // Employee requesting leave
   organizationId: string;
   leaveType: 'full_day' | 'half_day' | 'early_departure';
+  leaveCategory?: string;   // SL / CL / ... (code or name, case-insensitive). Defaults to the org's first type.
   startDate: string;        // YYYY-MM-DD format
   endDate?: string;         // YYYY-MM-DD format (optional)
   reason: string;
@@ -56,13 +66,14 @@ serve(async (req) => {
       userId, 
       organizationId, 
       leaveType = 'full_day',
+      leaveCategory,
       startDate,
       endDate,
       reason,
       isEmergency = false
     } = requestBody;
 
-    console.log('Request params:', { userId, organizationId, leaveType, startDate, reason });
+    console.log('Request params:', { userId, organizationId, leaveType, leaveCategory, startDate, reason });
 
     // Validate required fields
     if (!userId) throw new Error('userId is required');
@@ -96,6 +107,41 @@ serve(async (req) => {
 
     console.log('User verified:', userData.name);
 
+    // Resolve the leave category against the organisation's policy
+    const { data: orgData } = await supabaseAdmin
+      .from('organizations')
+      .select('leave_policy')
+      .eq('id', organizationId)
+      .maybeSingle();
+
+    const policy = parseLeavePolicy(orgData?.leave_policy);
+    const category = leaveCategory ? findLeaveType(policy, leaveCategory) : policy.types[0];
+    if (!category) {
+      const allowed = policy.types.map(t => `${t.code} (${t.name})`).join(', ');
+      throw new Error(`Unknown leave category "${leaveCategory}". Allowed: ${allowed}`);
+    }
+
+    // Current balance for that category, derived from this user's existing
+    // leave-request tasks in the current leave year.
+    const { data: existingTasks } = await supabaseAdmin
+      .from('tasks')
+      .select('description, status')
+      .eq('created_by', userId)
+      .eq('type', 'personalTask')
+      .ilike('description', '%LEAVE REQUEST DETAILS%');
+
+    const leaveYear = getLeaveYear(policy);
+    const balances = computeLeaveBalances(
+      policy,
+      (existingTasks || []).map(t => parseLeaveTaskDescription(t.description || '', t.status)),
+      leaveYear
+    );
+    const balance = balances.find(b => b.code === category.code)!;
+    const requestedDays = leaveDaysForRequest({ leave_type: leaveType, start_date: startDate, end_date: endDate });
+    const exceedsQuota = balance.annual_quota > 0 && requestedDays > balance.remaining;
+
+    console.log('Leave category:', category.code, 'balance:', formatBalance(balance), 'requested:', requestedDays);
+
     // Find admin for this organization
     const { data: adminData, error: adminError } = await supabaseAdmin
       .from('users')
@@ -122,15 +168,17 @@ serve(async (req) => {
     const leaveTypeDisplay = leaveType.replace('_', ' ').toUpperCase();
 
     // Create leave request task (assigned to admin for approval)
-    const taskTitle = `Leave Request: ${userData.name} - ${leaveTypeDisplay}${isPostFacto ? ' (Post Facto)' : ''}`;
-    
+    const taskTitle = `Leave Request: ${userData.name} - ${category.code} ${leaveTypeDisplay}${isPostFacto ? ' (Post Facto)' : ''}`;
+
     const taskDescription = `LEAVE REQUEST DETAILS:
 Employee: ${userData.name}
 Department: ${userData.department || 'Not specified'}
 Leave Type: ${leaveTypeDisplay}
+Leave Category: ${category.code}
 Start Date: ${startDate}${endDate ? `\nEnd Date: ${endDate}` : ''}
 Reason: ${reason}
 Emergency: ${isEmergency ? 'YES' : 'NO'}
+Balance At Request: ${category.code} ${formatBalance(balance)}${exceedsQuota ? ' (EXCEEDS QUOTA)' : ''}
 ${isPostFacto ? '\n⚠️ POST FACTO REQUEST: This leave has already been taken' : ''}
 Submitted via: WhatsApp
 
@@ -170,6 +218,17 @@ Please review and approve/reject this leave request.`;
             id: taskResult.id,
             employeeName: userData.name,
             leaveType: leaveTypeDisplay,
+            leaveCategory: category.code,
+            leaveCategoryName: category.name,
+            requestedDays,
+            balance: {
+              leaveYear: leaveYear.label,
+              annualQuota: balance.annual_quota,
+              used: balance.used,
+              pending: balance.pending,
+              remainingBeforeThisRequest: balance.remaining,
+              exceedsQuota
+            },
             startDate,
             endDate: endDate || null,
             reason,
@@ -180,9 +239,11 @@ Please review and approve/reject this leave request.`;
             createdAt: taskResult.created_at
           }
         },
-        message: isPostFacto 
+        message: (isPostFacto
           ? `Post-facto leave request submitted. ${adminName} will review it soon.`
-          : `Leave request submitted successfully. ${adminName} will review and respond within 24 hours.`
+          : `Leave request submitted successfully. ${adminName} will review and respond within 24 hours.`)
+          + ` ${category.code} balance: ${formatBalance(balance)}.`
+          + (exceedsQuota ? ` Note: this request exceeds your ${category.code} quota, so it needs special approval.` : '')
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

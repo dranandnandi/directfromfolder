@@ -22,7 +22,7 @@ export const generateTaskFromText = async (
       teamMembers.map(member => ({ name: member.name, role: member.role, department: member.department }));
 
     const prompt = `
-You are a medical task parser for "${organizationName}". Convert the following text into a structured task. 
+You are a task parser for "${organizationName}". Convert the following text into a structured task.
 The task MUST be of type "${selectedType}".
 Return ONLY a valid JSON object without any additional text or formatting.
 
@@ -32,10 +32,10 @@ ${availableTeamMembers.map(member => `- ${member.name} (${member.role}, ${member
 Input text to parse: "${text}"
 
 When extracting assignee information, look for:
-- Exact names: "assign to Dr. Smith"
+- Exact names: "assign to Priya Sharma"
 - Partial names: "give this to John" (match with John Doe)
-- Roles: "assign to the nurse" (match with nurses)
-- Departments: "give to cardiology team"
+- Roles: "assign to the supervisor" (match with supervisors)
+- Departments: "give to the accounts team"
 
 The JSON must follow this exact structure:
 {
@@ -43,37 +43,35 @@ The JSON must follow this exact structure:
   "description": "Detailed task description",
   "type": "${selectedType}", // This must be exactly this value
   "priority": "critical" | "moderate" | "lessImportant",
-  "patientId": "If mentioned, otherwise null",
-  "location": "For clinical rounds, room/location if mentioned, otherwise null",
-  "roundType": "For clinical rounds: ${organizationSettings.roundTypes.join('/')}, otherwise null",
+  "patientId": "Reference ID (client/case/record number) if mentioned, otherwise null",
+  "location": "For rounds, site/room/location if mentioned, otherwise null",
+  "roundType": "For rounds: ${organizationSettings.roundTypes.join('/')}, otherwise null",
   "advisoryType": "For quick advisory: ${organizationSettings.advisoryTypes.join('/')}, otherwise null",
   "followUpType": "For follow-ups: ${organizationSettings.followUpTypes.join('/')}, otherwise null",
   "assigneeName": "Name or role mentioned for assignment (from available team members), otherwise null",
-  "hoursToComplete": "For clinical rounds, extract number of hours mentioned (e.g., '4' for '4 hours'), otherwise null",
+  "hoursToComplete": "For rounds, extract number of hours mentioned (e.g., '4' for '4 hours'), otherwise null",
   "contactNumber": "Extract any phone number mentioned (e.g., +91-1234567890, 123-456-7890), otherwise null",
   "whatsappNumber": "Extract WhatsApp number if mentioned separately, otherwise null",
   "taskDate": "Extract due date if mentioned, format as YYYY-MM-DD, otherwise null",
   "taskTime": "Extract due time if mentioned, format as HH:MM, otherwise null"
 }
 
-Medical abbreviations understanding:
-- "round" = clinical round
+Common shorthand understanding:
+- "round" = a scheduled round / inspection visit
 - "f/u" or "follow up" = follow up task
-- "pt" = patient
-- "ward" = location
-- "stat" = urgent/critical priority
+- "ref" or "ref id" = reference ID
+- "site", "floor" or "branch" = location
+- "asap" or "urgent" = urgent/critical priority
 - "routine" = moderate priority
-- "Dr." = doctor
-- "nurse" = nursing staff
 
 Rules:
 1. ONLY return valid JSON, no other text
 2. All fields must be present
 3. Use null for optional fields that don't apply
-4. Type must be exactly one of: quickAdvisory, clinicalRound, followUp, personalTask
+4. Type must be exactly one of: ${Object.values(TaskType).join(', ')}
 5. Priority must be exactly one of: critical, moderate, lessImportant
 6. For assigneeName, extract the most relevant team member name or role from the available list
-   - If no hours mentioned for clinical rounds, default to 4 hours
+   - If no hours mentioned for tracking tasks, default to 4 hours
 9. If sub-tasks are mentioned, include them in the subTasks array
 10. PRESERVE ALL original values mentioned in the text, do not modify or generate new ones
 11. Correct any spelling or grammar mistakes in the input text
@@ -98,16 +96,16 @@ Text to parse: ${text}`;
       throw new Error('Missing required fields in the generated task');
     }
 
-    if (!['quickAdvisory', 'clinicalRound', 'followUp'].includes(taskData.type)) {
-      taskData.type = 'quickAdvisory';
+    if (!(Object.values(TaskType) as string[]).includes(taskData.type)) {
+      taskData.type = selectedType;
     }
 
     if (!['critical', 'moderate', 'lessImportant'].includes(taskData.priority)) {
       taskData.priority = 'moderate';
     }
 
-    // Set default hours for clinical rounds
-    if (taskData.type === 'clinicalRound') {
+    // Set default hours for tracking tasks
+    if (taskData.type === TaskType.ClientTracking) {
       taskData.hoursToComplete = taskData.hoursToComplete || 4;
     } else {
       taskData.hoursToComplete = null;
@@ -129,7 +127,7 @@ Text to parse: ${text}`;
     return {
       title: text.slice(0, 50) + (text.length > 50 ? '...' : ''),
       description: text,
-      type: 'quickAdvisory',
+      type: selectedType,
       priority: 'moderate',
       patientId: null,
       location: null,
@@ -177,7 +175,7 @@ export const generateWhatsAppMessage = async (task: any): Promise<string> => {
     }
 
     const prompt = `
-Create a clear, professional, and well-formatted WhatsApp message for a clinical task.
+Create a clear, professional, and well-formatted WhatsApp message for a work task.
 Use emojis appropriately and include all relevant details in a structured format.
 
 Task details:
@@ -187,10 +185,10 @@ Title: ${task.title}
 Description: ${task.description}
 Priority: ${priority}
 Due Date: ${dueDate}
-${task.patientId ? `Patient ID: ${task.patientId}` : ''}
+${task.patientId ? `Reference ID: ${task.patientId}` : ''}
 ${task.location ? `Location: ${task.location}` : ''}
 ${task.roundType ? `Round Type: ${task.roundType}` : ''}
-${task.type === 'clinicalRound' && task.hoursToComplete ? `Due: Complete within ${task.hoursToComplete} hours` : ''}
+${task.type === TaskType.ClientTracking && task.hoursToComplete ? `Due: Complete within ${task.hoursToComplete} hours` : ''}
 
 Required Format:
 Hi [assignee name], 
@@ -204,15 +202,15 @@ This task was assigned by [creator name].
 [task description]
 
 ${task.location ? '📍 Location: [location]' : ''}
-${task.patientId ? '👤 Patient ID: [patient ID]' : ''}
+${task.patientId ? '👤 Reference ID: [reference ID]' : ''}
 
 Please confirm receipt and update status accordingly.
 
 Thanks!
 
 IMPORTANT: 
-1. DO NOT include the task type (like "quickAdvisory") in the message
-2. DO NOT include "Sample ID: N/A" if there is no patient ID
+1. DO NOT include the task type (like "regularTask") in the message
+2. DO NOT include "Reference ID: N/A" if there is no reference ID
 3. Keep it professional, clear, and use appropriate emojis for visual clarity.`;
 
     const result = await model.generateContent(prompt);
@@ -235,7 +233,7 @@ This task was assigned by your team.
 ${task.description}
 
 ${task.location ? `📍 Location: ${task.location}\n` : ''}
-${task.patientId ? `👤 Patient ID: ${task.patientId}\n` : ''}
+${task.patientId ? `👤 Reference ID: ${task.patientId}\n` : ''}
 Please confirm receipt and update status accordingly.
 
 Thanks!`;

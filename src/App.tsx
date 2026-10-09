@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Routes, Route, useNavigate } from 'react-router-dom';
 import { supabase, retryOperation } from './utils/supabaseClient';
 import LoginForm from './components/auth/LoginForm';
+import ResetPasswordForm from './components/auth/ResetPasswordForm';
 import Sidebar from './components/Sidebar';
 import DashboardContainer from './components/DashboardContainer';
 import Header from './components/Header';
@@ -26,6 +27,7 @@ const AttendanceDashboard = lazy(() => import('./components/hr/AttendanceDashboa
 const AIAttendanceConfigurator = lazy(() => import('./components/hr/AIAttendanceConfigurator'));
 const AIAttendanceReviewQueue = lazy(() => import('./components/hr/AIAttendanceReviewQueue'));
 const AIAttendanceCenter = lazy(() => import('./components/hr/AIAttendanceCenter'));
+const WhatsAppConnection = lazy(() => import('./components/WhatsAppConnection'));
 
 // Payroll system lazy imports
 const PayrollShell = lazy(() => import('./payroll/PayrollShell'));
@@ -42,6 +44,7 @@ interface RawSupabaseUser {
   whatsapp_number: string;
   role: string;
   department: string;
+  is_active?: boolean;
 }
 
 interface RawSupabaseTask {
@@ -82,9 +85,25 @@ interface RawSupabasePersonalTask {
   assignee?: RawSupabaseUser[] | RawSupabaseUser | null;
 }
 
+const getActiveJoinedUser = (
+  user: RawSupabaseUser[] | RawSupabaseUser | null | undefined
+): RawSupabaseUser | null => {
+  const joinedUser = Array.isArray(user) ? user[0] : user;
+  return joinedUser && joinedUser.is_active !== false ? joinedUser : null;
+};
+
+const toTaskUser = (user: RawSupabaseUser): User => ({
+  id: user.id,
+  name: user.name,
+  whatsappNumber: user.whatsapp_number,
+  role: user.role,
+  department: user.department
+});
+
 function App() {
   const navigate = useNavigate();
   const [session, setSession] = useState<any>(null);
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -122,10 +141,10 @@ function App() {
   const [organizationSettings, setOrganizationSettings] = useState<OrganizationSettings>({
     id: '1',
     organizationId: '1',
-    name: 'Clinic Task Manager',
-    advisoryTypes: ['Medication', 'Diet', 'Lifestyle', 'Emergency'],
-    roundTypes: ['Morning Round', 'Evening Round', 'Emergency Round'],
-    followUpTypes: ['Post Surgery', 'Treatment Progress', 'Test Results', 'General Check-up'],
+    name: 'Staff Management Solution',
+    advisoryTypes: ['General', 'Policy', 'Safety', 'Urgent'],
+    roundTypes: ['Morning Round', 'Evening Round', 'Night Round'],
+    followUpTypes: ['Progress Update', 'Issue Resolution', 'Report Review', 'General Check-in'],
     createdAt: new Date(),
     updatedAt: new Date(),
   });
@@ -165,7 +184,10 @@ function App() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordRecovery(true);
+      }
       setSession(session);
       setLoading(false);
     });
@@ -319,7 +341,7 @@ function App() {
       setOrganizationSettings({
         id: data.id,
         organizationId: data.id,
-        name: data.name || 'Clinic Task Manager',
+        name: data.name || 'Staff Management Solution',
         advisoryTypes: data.advisory_types || [],
         roundTypes: data.round_types || [],
         followUpTypes: data.follow_up_types || [],
@@ -478,7 +500,8 @@ function App() {
               name,
               whatsapp_number,
               role,
-              department
+              department,
+              is_active
             )
           `)
           .or(`user_id.eq.${userData.id},assignee_id.eq.${userData.id}`);
@@ -493,29 +516,22 @@ function App() {
           console.log(`Personal task ${index} (${task.id}) assignee:`, task.assignee);
         });
 
-        const formattedTasks: Task[] = typedPersonalTasksData.map(task => ({
-          id: task.id,
-          title: task.title,
-          description: task.description,
-          type: TaskType.PersonalTask,
-          status: task.status as TaskStatus,
-          priority: task.priority as TaskPriority,
-          dueDate: task.due_date ? new Date(task.due_date) : undefined,
-          createdAt: new Date(task.created_at),
-          assignees: task.assignee && Array.isArray(task.assignee) && task.assignee.length > 0 ? [{
-            id: task.assignee[0].id,
-            name: task.assignee[0].name,
-            whatsappNumber: task.assignee[0].whatsapp_number,
-            role: task.assignee[0].role,
-            department: task.assignee[0].department
-          }] : task.assignee && !Array.isArray(task.assignee) ? [{
-            id: task.assignee.id,
-            name: task.assignee.name,
-            whatsappNumber: task.assignee.whatsapp_number,
-            role: task.assignee.role,
-            department: task.assignee.department
-          }] : []
-        }));
+        const formattedTasks: Task[] = typedPersonalTasksData
+          .filter(task => !task.assignee_id || getActiveJoinedUser(task.assignee))
+          .map(task => {
+            const assignee = getActiveJoinedUser(task.assignee);
+            return {
+              id: task.id,
+              title: task.title,
+              description: task.description,
+              type: TaskType.PersonalTask,
+              status: task.status as TaskStatus,
+              priority: task.priority as TaskPriority,
+              dueDate: task.due_date ? new Date(task.due_date) : undefined,
+              createdAt: new Date(task.created_at),
+              assignees: assignee ? [toTaskUser(assignee)] : []
+            };
+          });
 
         console.log('Formatted personal tasks with assignees:', formattedTasks);
         console.log('Personal tasks with empty assignees:', formattedTasks.filter(t => !t.assignees || t.assignees.length === 0).length);
@@ -572,11 +588,12 @@ function App() {
         // Set user role
         setUserRole(userRole);
 
-        // Then fetch all team members from that organization
+        // Then fetch all active team members from that organization
         const { data: members, error: membersError } = await supabase
           .from('users')
           .select('id, name, whatsapp_number, role, department')
-          .eq('organization_id', organizationId);
+          .eq('organization_id', organizationId)
+          .eq('is_active', true);
 
         if (membersError) throw membersError;
 
@@ -655,7 +672,8 @@ function App() {
               name,
               whatsapp_number,
               role,
-              department
+              department,
+              is_active
             )
           `)
           .eq('organization_id', organizationId);
@@ -684,37 +702,30 @@ function App() {
           console.log(`Task ${index} (${task.id}) assigned_to:`, task.assigned_to);
         });
 
-        const formattedTasks: Task[] = typedTasksData.map(task => ({
-          id: task.id,
-          title: task.title,
-          description: task.description,
-          type: task.type,
-          status: task.status as TaskStatus,
-          priority: task.priority as TaskPriority,
-          manualWhatsappNumber: task.manual_whatsapp_number,
-          contactNumber: task.contact_number,
-          assignees: task.assigned_to && Array.isArray(task.assigned_to) && task.assigned_to.length > 0 ? [{
-            id: task.assigned_to[0].id,
-            name: task.assigned_to[0].name,
-            whatsappNumber: task.assigned_to[0].whatsapp_number,
-            role: task.assigned_to[0].role,
-            department: task.assigned_to[0].department
-          }] : task.assigned_to && !Array.isArray(task.assigned_to) ? [{
-            id: task.assigned_to.id,
-            name: task.assigned_to.name,
-            whatsappNumber: task.assigned_to.whatsapp_number,
-            role: task.assigned_to.role,
-            department: task.assigned_to.department
-          }] : [],
-          patientId: task.patient_id,
-          dueDate: task.due_date ? new Date(task.due_date) : undefined,
-          location: task.location,
-          roundType: task.round_type,
-          followUpType: task.follow_up_type,
-          advisoryType: task.advisory_type,
-          hoursToComplete: task.hours_to_complete,
-          createdAt: new Date(task.created_at)
-        }));
+        const formattedTasks: Task[] = typedTasksData
+          .filter(task => !task.assigned_to || getActiveJoinedUser(task.assigned_to))
+          .map(task => {
+            const assignee = getActiveJoinedUser(task.assigned_to);
+            return {
+              id: task.id,
+              title: task.title,
+              description: task.description,
+              type: task.type,
+              status: task.status as TaskStatus,
+              priority: task.priority as TaskPriority,
+              manualWhatsappNumber: task.manual_whatsapp_number,
+              contactNumber: task.contact_number,
+              assignees: assignee ? [toTaskUser(assignee)] : [],
+              patientId: task.patient_id,
+              dueDate: task.due_date ? new Date(task.due_date) : undefined,
+              location: task.location,
+              roundType: task.round_type,
+              followUpType: task.follow_up_type,
+              advisoryType: task.advisory_type,
+              hoursToComplete: task.hours_to_complete,
+              createdAt: new Date(task.created_at)
+            };
+          });
 
         console.log('Formatted tasks with assignees:', formattedTasks);
         console.log('Tasks with empty assignees:', formattedTasks.filter(t => !t.assignees || t.assignees.length === 0).length);
@@ -952,6 +963,10 @@ function App() {
     return <LoginForm />;
   }
 
+  if (passwordRecovery) {
+    return <ResetPasswordForm onComplete={() => setPasswordRecovery(false)} />;
+  }
+
   return (
     <div className="min-h-screen bg-gray-100 safe-area-container">
       {/* Sidebar for larger screens */}
@@ -1035,6 +1050,11 @@ function App() {
               <Route path="/conversations" element={
                 <Suspense fallback={<div className="p-4">Loading conversation dashboard...</div>}>
                   <ConversationDashboard />
+                </Suspense>
+              } />
+              <Route path="/whatsapp-connection" element={
+                <Suspense fallback={<div className="p-4">Loading WhatsApp connection...</div>}>
+                  <WhatsAppConnection />
                 </Suspense>
               } />
               <Route path="/adminDashboard" element={

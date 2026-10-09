@@ -122,10 +122,13 @@ serve(async (req) => {
     const creatorIds = [...new Set(leaveRequests.map(r => r.created_by).filter(Boolean))];
     const creatorMap: Record<string, any> = {};
     if (creatorIds.length > 0) {
-      const { data: creators } = await supabaseAdmin
+      const { data: creators, error: creatorsError } = await supabaseAdmin
         .from('users')
-        .select('id, name, phone_number')
+        .select('id, name, whatsapp_number')
         .in('id', creatorIds);
+      if (creatorsError) {
+        console.error('Creator lookup error:', creatorsError);
+      }
       if (creators) {
         for (const c of creators) {
           creatorMap[c.id] = c;
@@ -169,30 +172,45 @@ serve(async (req) => {
     const startDateMatch = descText.match(/Start Date: (\d{4}-\d{2}-\d{2})/);
     const endDateMatch = descText.match(/End Date: (\d{4}-\d{2}-\d{2})/);
     const reasonMatch = descText.match(/Reason: (.+?)(?:\n|$)/);
-    
+    // SL / CL / ... written by the app and whatsapp-request-leave. Older
+    // requests predate categories and have none.
+    const categoryMatch = descText.match(/^Leave Category:[ \t]*(.+)$/m);
+    const balanceMatch = descText.match(/^Balance At Request:[ \t]*(.+)$/m);
+
     const startDate = startDateMatch ? startDateMatch[1] : 'N/A';
     const endDate = endDateMatch ? endDateMatch[1] : startDate;
     const leaveReason = reasonMatch ? reasonMatch[1].trim() : 'Not specified';
+    const leaveCategory = categoryMatch ? categoryMatch[1].trim() : null;
+    const balanceAtRequest = balanceMatch ? balanceMatch[1].trim() : null;
+    const exceedsQuota = /EXCEEDS QUOTA/.test(balanceAtRequest || '');
 
     console.log('Processing leave request:', {
       id: targetRequest.id,
       employee: creatorName,
       leaveType,
+      leaveCategory,
+      balanceAtRequest,
       startDate,
       endDate
     });
 
-    // Update task status
-    const newStatus = action === 'approve' ? 'completed' : 'rejected';
-    const updateComment = action === 'approve' 
-      ? `✅ APPROVED by ${adminData.name} via WhatsApp`
-      : `❌ REJECTED by ${adminData.name} via WhatsApp${reason ? `\nReason: ${reason}` : ''}`;
+    // Update task status. 'cancelled' is the value the app and the performance
+    // report views read as a rejected leave - 'rejected' reads back as pending.
+    const newStatus = action === 'approve' ? 'completed' : 'cancelled';
+
+    // Same decision block the app writes, so both paths parse identically.
+    const decisionBlock = `\n\n---\nDECISION: ${action === 'approve' ? 'APPROVED' : 'REJECTED'}` +
+      `\nDecided By: ${adminData.name} (via WhatsApp)` +
+      `\nDecided At: ${new Date().toISOString()}` +
+      `\nDecision Note: ${reason?.trim() || (action === 'approve' ? 'Approved' : 'No reason provided')}`;
 
     const { error: updateError } = await supabaseAdmin
       .from('tasks')
       .update({
         status: newStatus,
-        description: targetRequest.description + `\n\n---\n${updateComment}\nProcessed: ${new Date().toISOString()}`
+        completed_at: action === 'approve' ? new Date().toISOString() : null,
+        updated_at: new Date().toISOString(),
+        description: targetRequest.description + decisionBlock
       })
       .eq('id', targetRequest.id);
 
@@ -204,8 +222,9 @@ serve(async (req) => {
     console.log(`Leave request ${action}ed successfully`);
 
     // Get employee's phone number for notification
-    const employeePhone = creatorInfo?.phone_number;
+    const employeePhone = creatorInfo?.whatsapp_number;
     let employeeNotified = false;
+    let notificationError: string | null = null;
 
     // Create notification for the employee
     if (targetRequest.created_by) {
@@ -221,10 +240,12 @@ serve(async (req) => {
         .from('notifications')
         .insert([{
           user_id: targetRequest.created_by,
-          organization_id: organizationId,
+          task_id: targetRequest.id,
+          // Must be one of the values allowed by notifications_type_check;
+          // anything else silently drops the employee's notification.
+          type: action === 'approve' ? 'leave_request_approved' : 'leave_request_rejected',
           title: notificationTitle,
           message: notificationMessage,
-          type: 'leave_response',
           read: false,
           // WhatsApp notification fields
           whatsapp_number: employeePhone,
@@ -234,17 +255,26 @@ serve(async (req) => {
 
       if (notifError) {
         console.error('Notification error:', notifError);
-        // Don't fail the whole operation for notification error
+        notificationError = notifError.message;
       } else {
         employeeNotified = !!employeePhone;
         console.log('Employee notification created', employeeNotified ? '(WhatsApp pending)' : '(no phone)');
       }
     }
 
-    // Prepare response
-    const responseMessage = action === 'approve'
-      ? `Leave request for ${creatorName} has been approved! ${employeeNotified ? 'They will be notified via WhatsApp.' : ''}`
-      : `Leave request for ${creatorName} has been rejected. ${employeeNotified ? 'They will be notified via WhatsApp.' : ''}`;
+    // Prepare response. Report the notification outcome honestly - previously
+    // this claimed the employee would be notified even when the insert failed.
+    const notifyNote = notificationError
+      ? ' However, notifying them failed - please inform them directly.'
+      : employeeNotified
+        ? ' They will be notified via WhatsApp.'
+        : ' No WhatsApp number is on file for them, so no message was sent.';
+
+    const responseMessage = (action === 'approve'
+      ? `Leave request for ${creatorName} has been approved!`
+      : `Leave request for ${creatorName} has been rejected.`)
+      + (action === 'approve' && exceedsQuota ? ` Note: it exceeded their ${leaveCategory || 'leave'} quota.` : '')
+      + notifyNote;
 
     return new Response(
       JSON.stringify({
@@ -253,12 +283,16 @@ serve(async (req) => {
         data: {
           employeeName: creatorName,
           leaveType,
+          leaveCategory,
+          balanceAtRequest,
+          exceedsQuota,
           startDate,
           endDate,
           reason: leaveReason,
           action,
           adminReason: reason,
-          employeeNotified
+          employeeNotified,
+          notificationError
         }
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

@@ -106,12 +106,16 @@ serve(async (req) => {
     // Verify user exists and belongs to organization
     const { data: userData, error: userError } = await supabaseAdmin
       .from('users')
-      .select('id, name, organization_id, role')
+      .select('id, name, organization_id, role, is_active')
       .eq('id', userId)
       .single();
 
     if (userError || !userData) {
       throw new Error('User not found');
+    }
+
+    if (userData.is_active === false) {
+      throw new Error('User is inactive');
     }
 
     if (userData.organization_id !== organizationId) {
@@ -125,12 +129,16 @@ serve(async (req) => {
     if (assigneeId) {
       const { data: assigneeData, error: assigneeError } = await supabaseAdmin
         .from('users')
-        .select('id, name, organization_id')
+        .select('id, name, organization_id, is_active')
         .eq('id', assigneeId)
         .single();
 
       if (assigneeError || !assigneeData) {
         throw new Error('Assignee not found');
+      }
+
+      if (assigneeData.is_active === false) {
+        throw new Error('Assignee is inactive');
       }
 
       if (assigneeData.organization_id !== organizationId) {

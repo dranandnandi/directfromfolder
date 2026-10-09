@@ -3,6 +3,59 @@ import { Shift, EmployeeShift, Attendance, AttendanceRegularization, PunchData, 
 import { calculateDistance, parseGeofenceSettings } from '../utils/geolocation';
 
 export class AttendanceService {
+  static async getOrganizationEmployees(organizationId: string): Promise<Array<{
+    id: string;
+    name: string;
+    department: string;
+    email: string;
+  }>> {
+    const employeesById = new Map<string, {
+      id: string;
+      name: string;
+      department: string;
+      email: string;
+    }>();
+
+    const { data: directUsers, error: directError } = await supabase
+      .from('users')
+      .select('id, name, department, email')
+      .eq('organization_id', organizationId)
+      .eq('role', 'user')
+      .order('name');
+
+    if (directError) throw directError;
+
+    for (const user of directUsers || []) {
+      employeesById.set(user.id, user);
+    }
+
+    const { data: memberships, error: membershipError } = await supabase
+      .from('organization_memberships')
+      .select(`
+        user:users!organization_memberships_user_id_fkey(id, name, department, email, role)
+      `)
+      .eq('organization_id', organizationId)
+      .eq('status', 'active');
+
+    if (membershipError && membershipError.code !== '42P01') {
+      throw membershipError;
+    }
+
+    for (const membership of memberships || []) {
+      const user = Array.isArray(membership.user) ? membership.user[0] : membership.user;
+      if (user?.id && user.role === 'user') {
+        employeesById.set(user.id, {
+          id: user.id,
+          name: user.name,
+          department: user.department,
+          email: user.email,
+        });
+      }
+    }
+
+    return Array.from(employeesById.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
   private static toLocalDateString(date: Date = new Date()): string {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -14,6 +67,13 @@ export class AttendanceService {
     const previous = new Date(date);
     previous.setDate(previous.getDate() - 1);
     return this.toLocalDateString(previous);
+  }
+
+  private static getPreviousDateString(dateString: string): string {
+    const [year, month, day] = dateString.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    date.setDate(date.getDate() - 1);
+    return this.toLocalDateString(date);
   }
 
   private static parseTimeToMinutes(timeValue?: string | null): number | null {
@@ -201,30 +261,48 @@ export class AttendanceService {
   // ========== EMPLOYEE SHIFT ASSIGNMENT ==========
 
   static async assignShiftToEmployee(assignment: Omit<EmployeeShift, 'id' | 'created_at'>): Promise<EmployeeShift> {
-    // First, end any existing active assignments for this user on or after the effective date
-    const { error: updateError } = await supabase
-      .from('employee_shifts')
-      .update({
-        effective_to: new Date(new Date(assignment.effective_from).getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0] // Day before new assignment
-      })
-      .eq('user_id', assignment.user_id)
-      .gte('effective_from', assignment.effective_from)
-      .is('effective_to', null); // Only update active assignments
+    const effectiveFrom = assignment.effective_from;
+    const effectiveTo = assignment.effective_to || null;
+    const previousDate = this.getPreviousDateString(effectiveFrom);
 
-    if (updateError) {
-      console.error('Error updating existing assignments:', updateError);
-      // Don't throw here, try to continue with the insert
+    if (effectiveTo && effectiveTo < effectiveFrom) {
+      throw new Error('Effective upto date cannot be before effective from date');
     }
 
-    // Also end any existing assignments that overlap with the new effective date
+    const { data: existingSameDay, error: existingSameDayError } = await supabase
+      .from('employee_shifts')
+      .select('*')
+      .eq('user_id', assignment.user_id)
+      .eq('effective_from', effectiveFrom)
+      .maybeSingle();
+
+    if (existingSameDayError) throw existingSameDayError;
+
+    if (existingSameDay) {
+      const { data, error } = await supabase
+        .from('employee_shifts')
+        .update({
+          shift_id: assignment.shift_id,
+          assigned_by: assignment.assigned_by,
+          effective_to: effectiveTo,
+        })
+        .eq('id', existingSameDay.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    }
+
+    // End the previous current assignment only when it overlaps this effective date.
     const { error: overlapError } = await supabase
       .from('employee_shifts')
       .update({
-        effective_to: new Date(new Date(assignment.effective_from).getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        effective_to: previousDate,
       })
       .eq('user_id', assignment.user_id)
-      .lte('effective_from', assignment.effective_from)
-      .is('effective_to', null); // Only active assignments without end date
+      .lt('effective_from', effectiveFrom)
+      .or(`effective_to.is.null,effective_to.gte.${effectiveFrom}`);
 
     if (overlapError) {
       console.error('Error ending overlapping assignments:', overlapError);
@@ -293,6 +371,16 @@ export class AttendanceService {
   }
 
   static async getShiftAssignments(organizationId: string): Promise<EmployeeShift[]> {
+    const { data: orgShifts, error: shiftsError } = await supabase
+      .from('shifts')
+      .select('id')
+      .eq('organization_id', organizationId);
+
+    if (shiftsError) throw shiftsError;
+
+    const shiftIds = (orgShifts || []).map(shift => shift.id).filter(Boolean);
+    if (shiftIds.length === 0) return [];
+
     const { data, error } = await supabase
       .from('employee_shifts')
       .select(`
@@ -300,7 +388,7 @@ export class AttendanceService {
         shift:shifts(*),
         user:users!employee_shifts_user_id_fkey(id, name, department)
       `)
-      .eq('shift.organization_id', organizationId)
+      .in('shift_id', shiftIds)
       .order('effective_from', { ascending: false });
 
     if (error) throw error;
@@ -403,7 +491,10 @@ export class AttendanceService {
     const { data, error } = await supabase
       .from('attendance')
       .upsert(attendanceData, { onConflict: 'user_id,date' })
-      .select()
+      .select(`
+        *,
+        shift:shifts(*)
+      `)
       .single();
 
     if (error) throw error;
@@ -524,7 +615,10 @@ export class AttendanceService {
       .from('attendance')
       .update(updateData)
       .eq('id', activeRecord.id)  // Update by ID, not by date
-      .select()
+      .select(`
+        *,
+        shift:shifts(*)
+      `)
       .single();
 
     if (error) throw error;
@@ -542,10 +636,10 @@ export class AttendanceService {
       `)
       .eq('user_id', userId)
       .eq('date', today)
-      .single();
+      .maybeSingle();
 
-    if (error && error.code !== 'PGRST116') throw error;
-    return data || null;
+    if (error) throw error;
+    return data;
   }
 
   static async getTodayOrActiveAttendance(userId: string): Promise<Attendance | null> {

@@ -11,6 +11,7 @@ interface RawSupabaseUser {
   whatsapp_number: string;
   role: string;
   department: string;
+  is_active?: boolean;
 }
 
 interface RawSupabaseTask {
@@ -56,6 +57,7 @@ interface RawSupabasePersonalTask {
     role: string;
     department: string;
     organization_id: string;
+    is_active?: boolean;
   };
 }
 
@@ -84,6 +86,21 @@ const DeleteTasks: React.FC<DeleteTasksProps> = ({ teamMembers, onTasksRefreshed
     status: '',
     dateFilter: 'all',
     searchTerm: ''
+  });
+
+  const getActiveJoinedUser = (
+    user: RawSupabaseUser[] | RawSupabaseUser | null | undefined
+  ): RawSupabaseUser | null => {
+    const joinedUser = Array.isArray(user) ? user[0] : user;
+    return joinedUser && joinedUser.is_active !== false ? joinedUser : null;
+  };
+
+  const toTaskUser = (user: RawSupabaseUser): User => ({
+    id: user.id,
+    name: user.name,
+    whatsappNumber: user.whatsapp_number,
+    role: user.role,
+    department: user.department
   });
 
   useEffect(() => {
@@ -142,7 +159,8 @@ const DeleteTasks: React.FC<DeleteTasksProps> = ({ teamMembers, onTasksRefreshed
             name,
             whatsapp_number,
             role,
-            department
+            department,
+            is_active
           )
         `)
         .eq('organization_id', userData.organization_id);
@@ -199,7 +217,8 @@ const DeleteTasks: React.FC<DeleteTasksProps> = ({ teamMembers, onTasksRefreshed
             name,
             whatsapp_number,
             role,
-            department
+            department,
+            is_active
           ),
           creator:users!personal_tasks_user_id_fkey (
             id,
@@ -207,7 +226,8 @@ const DeleteTasks: React.FC<DeleteTasksProps> = ({ teamMembers, onTasksRefreshed
             whatsapp_number,
             role,
             department,
-            organization_id
+            organization_id,
+            is_active
           )
         `);
 
@@ -260,72 +280,59 @@ const DeleteTasks: React.FC<DeleteTasksProps> = ({ teamMembers, onTasksRefreshed
       if (personalTasksResult.error) throw personalTasksResult.error;
 
       // Transform organization tasks to match Task interface
-      const formattedOrgTasks: Task[] = typedOrgTasksData.map(task => ({
-        id: task.id,
-        title: task.title,
-        description: task.description,
-        type: task.type,
-        status: task.status as TaskStatus,
-        priority: task.priority as TaskPriority,
-        assignees: task.assigned_to && Array.isArray(task.assigned_to) && task.assigned_to.length > 0 ? [{
-          id: task.assigned_to[0].id,
-          name: task.assigned_to[0].name,
-          whatsappNumber: task.assigned_to[0].whatsapp_number,
-          role: task.assigned_to[0].role,
-          department: task.assigned_to[0].department
-        }] : task.assigned_to && !Array.isArray(task.assigned_to) ? [{
-          id: task.assigned_to.id,
-          name: task.assigned_to.name,
-          whatsappNumber: task.assigned_to.whatsapp_number,
-          role: task.assigned_to.role,
-          department: task.assigned_to.department
-        }] : [],
-        patientId: task.patient_id,
-        dueDate: task.due_date ? new Date(task.due_date) : undefined,
-        location: task.location,
-        roundType: task.round_type,
-        followUpType: task.follow_up_type,
-        advisoryType: task.advisory_type,
-        manualWhatsappNumber: task.manual_whatsapp_number,
-        contactNumber: task.contact_number,
-        hoursToComplete: task.hours_to_complete,
-        createdAt: new Date(task.created_at)
-      }));
+      const formattedOrgTasks: Task[] = typedOrgTasksData
+        .filter(task => !task.assigned_to || getActiveJoinedUser(task.assigned_to))
+        .map(task => {
+          const assignee = getActiveJoinedUser(task.assigned_to);
+          return {
+            id: task.id,
+            title: task.title,
+            description: task.description,
+            type: task.type,
+            status: task.status as TaskStatus,
+            priority: task.priority as TaskPriority,
+            assignees: assignee ? [toTaskUser(assignee)] : [],
+            patientId: task.patient_id,
+            dueDate: task.due_date ? new Date(task.due_date) : undefined,
+            location: task.location,
+            roundType: task.round_type,
+            followUpType: task.follow_up_type,
+            advisoryType: task.advisory_type,
+            manualWhatsappNumber: task.manual_whatsapp_number,
+            contactNumber: task.contact_number,
+            hoursToComplete: task.hours_to_complete,
+            createdAt: new Date(task.created_at)
+          };
+        });
 
       console.log('Formatted Org Tasks:', formattedOrgTasks);
 
       // Transform personal tasks to match Task interface
-      const formattedPersonalTasks: Task[] = typedPersonalTasksData.map(task => ({
-        id: task.id,
-        title: task.title,
-        description: task.description,
-        type: TaskType.PersonalTask,
-        status: task.status as TaskStatus,
-        priority: task.priority as TaskPriority,
-        assignees: task.assignee && Array.isArray(task.assignee) && task.assignee.length > 0 ? [{
-          id: task.assignee[0].id,
-          name: task.assignee[0].name,
-          whatsappNumber: task.assignee[0].whatsapp_number,
-          role: task.assignee[0].role,
-          department: task.assignee[0].department
-        }] : task.assignee && !Array.isArray(task.assignee) ? [{
-          id: task.assignee.id,
-          name: task.assignee.name,
-          whatsappNumber: task.assignee.whatsapp_number,
-          role: task.assignee.role,
-          department: task.assignee.department
-        }] : [],
-        patientId: undefined,
-        dueDate: task.due_date ? new Date(task.due_date) : undefined,
-        location: undefined,
-        roundType: undefined,
-        followUpType: undefined,
-        advisoryType: undefined,
-        manualWhatsappNumber: undefined,
-        contactNumber: undefined,
-        hoursToComplete: undefined,
-        createdAt: new Date(task.created_at)
-      }));
+      const formattedPersonalTasks: Task[] = typedPersonalTasksData
+        .filter(task => task.creator?.is_active !== false)
+        .filter(task => !task.assignee_id || getActiveJoinedUser(task.assignee))
+        .map(task => {
+          const assignee = getActiveJoinedUser(task.assignee);
+          return {
+            id: task.id,
+            title: task.title,
+            description: task.description,
+            type: TaskType.PersonalTask,
+            status: task.status as TaskStatus,
+            priority: task.priority as TaskPriority,
+            assignees: assignee ? [toTaskUser(assignee)] : [],
+            patientId: undefined,
+            dueDate: task.due_date ? new Date(task.due_date) : undefined,
+            location: undefined,
+            roundType: undefined,
+            followUpType: undefined,
+            advisoryType: undefined,
+            manualWhatsappNumber: undefined,
+            contactNumber: undefined,
+            hoursToComplete: undefined,
+            createdAt: new Date(task.created_at)
+          };
+        });
 
       console.log('Formatted Personal Tasks:', formattedPersonalTasks);
 
@@ -484,7 +491,7 @@ const DeleteTasks: React.FC<DeleteTasksProps> = ({ teamMembers, onTasksRefreshed
   const getTaskTypeLabel = (type: string) => {
     switch (type) {
       case TaskType.RegularTask: return 'Regular Tasks';
-      case TaskType.PatientTracking: return 'Patient Tracking';
+      case TaskType.ClientTracking: return 'Client Tracking';
       case TaskType.AuditTask: return 'Audit Tasks';
       case TaskType.PersonalTask: return 'Personal Task';
       default: return type;
@@ -611,7 +618,7 @@ const DeleteTasks: React.FC<DeleteTasksProps> = ({ teamMembers, onTasksRefreshed
             >
               <option value="">All Types</option>
               <option value={TaskType.RegularTask}>Regular Tasks</option>
-              <option value={TaskType.PatientTracking}>Patient Tracking</option>
+              <option value={TaskType.ClientTracking}>Client Tracking</option>
               <option value={TaskType.AuditTask}>Audit Task</option>
               <option value={TaskType.PersonalTask}>Personal Task</option>
             </select>
@@ -732,7 +739,7 @@ const DeleteTasks: React.FC<DeleteTasksProps> = ({ teamMembers, onTasksRefreshed
                       </div>
                       {task.patientId && (
                         <div className="text-xs text-gray-400">
-                          Patient: {task.patientId}
+                          Reference: {task.patientId}
                         </div>
                       )}
                     </div>

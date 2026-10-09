@@ -109,7 +109,7 @@ const MyFocusDashboard: React.FC<MyFocusDashboardProps> = ({
   const getTaskTypeColor = (type: TaskType) => {
     switch (type) {
       case TaskType.RegularTask: return 'bg-purple-100 text-purple-800';
-      case TaskType.PatientTracking: return 'bg-blue-100 text-blue-800';
+      case TaskType.ClientTracking: return 'bg-blue-100 text-blue-800';
       case TaskType.AuditTask: return 'bg-green-100 text-green-800';
       case TaskType.PersonalTask: return 'bg-gray-100 text-gray-800';
       default: return 'bg-gray-100 text-gray-800';
@@ -119,7 +119,7 @@ const MyFocusDashboard: React.FC<MyFocusDashboardProps> = ({
   const getTaskTypeLabel = (type: TaskType) => {
     switch (type) {
       case TaskType.RegularTask: return 'Regular Task';
-      case TaskType.PatientTracking: return 'Patient Tracking';
+      case TaskType.ClientTracking: return 'Client Tracking';
       case TaskType.AuditTask: return 'Audit Task';
       case TaskType.PersonalTask: return 'Personal Task';
       default: return type;

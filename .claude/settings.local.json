@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(npx tsc *)",
+      "Bash(echo \"exit:$?\")",
+      "PowerShell(npx tsc --noEmit -p tsconfig.json 2>&1)",
+      "Bash(node \"C:/Users/Lenovo/AppData/Local/Temp/claude/d--task-manager-android-app-project/87031734-d321-4881-a35c-d3ecd6093ecd/scratchpad/parse-test.mjs\")",
+      "Bash(node \"C:/Users/Lenovo/AppData/Local/Temp/claude/d--task-manager-android-app-project/87031734-d321-4881-a35c-d3ecd6093ecd/scratchpad/url-test.mjs\")",
+      "Bash(node -e \"console.log\\(require.resolve\\('@supabase/supabase-js'\\)\\)\")",
+      "Bash(node -e ' *)",
+      "Bash(npx cap *)",
+      "Bash(echo \"ignored-exit:$?\")"
     ]
   }
 }

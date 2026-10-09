@@ -12,6 +12,15 @@ import {
 } from 'react-icons/hi';
 import { supabase } from '../utils/supabaseClient';
 import { sendWhatsAppMessage } from '../utils/whatsappUtils';
+import {
+  LeaveBalance,
+  LeavePolicy,
+  computeLeaveBalances,
+  formatBalance,
+  getLeaveYear,
+  leaveDaysForRequest,
+  parseLeavePolicy
+} from '../utils/leavePolicy';
 
 // Helper function to generate smart WhatsApp links (mobile vs desktop)
 const generateWhatsAppLink = (phoneNumber: string, message: string) => {
@@ -27,8 +36,109 @@ const generateWhatsAppLink = (phoneNumber: string, message: string) => {
   return `${baseURL}?phone=91${formattedNumber}&text=${encodedMessage}`;
 };
 
+// Leave requests are stored as tasks whose description follows a fixed layout
+// (see LeaveRequestForm below and the whatsapp-request-leave function), so the
+// structured fields are read back out of that description.
+const parseLeaveDetails = (description: string = '') => {
+  const field = (label: string) => {
+    const value = description.match(new RegExp(`^${label}:[ \\t]*(.*)$`, 'm'))?.[1]?.trim();
+    return value && value !== 'Not specified' ? value : undefined;
+  };
+
+  // The reason comes from a free-text textarea, so it can span several lines.
+  // Deliberately no `m` flag: `$` must mean end-of-string, otherwise the lazy
+  // quantifier stops at the first line break and truncates the reason.
+  const reason = description
+    .match(/Reason:[ \t]*([\s\S]*?)(?=\n(?:Emergency|Submitted via|Start Date|End Date)|\n-{3}|$)/)?.[1]
+    ?.trim();
+
+  const rawType = field('Leave Type');
+
+  return {
+    employee_name: field('Employee'),
+    employee_department: field('Department'),
+    // Stored for display ("FULL DAY"); normalised back to the internal form so
+    // the existing `replace('_', ' ').toUpperCase()` render path still works.
+    leave_type: rawType ? rawType.toLowerCase().replace(/\s+/g, '_') : undefined,
+    // SL / CL / ... - absent on requests made before categories existed.
+    leave_category: field('Leave Category'),
+    start_date: field('Start Date'),
+    end_date: field('End Date'),
+    reason
+  };
+};
+
+// Approvals/rejections append a decision block to the description. Older rows
+// predate that block and instead had their title overwritten with the decision,
+// so fall back to the title to keep historic reasons visible.
+const parseDecision = (description: string = '', title: string = '') => {
+  const markerIndex = description.lastIndexOf('DECISION:');
+
+  if (markerIndex !== -1) {
+    const block = description.slice(markerIndex);
+    return {
+      by: block.match(/^Decided By:[ \t]*(.+)$/m)?.[1]?.trim(),
+      note: block.match(/\nDecision Note:[ \t]*([\s\S]*)$/)?.[1]?.trim()
+    };
+  }
+
+  const legacy = title.match(/^(?:APPROVED|REJECTED):\s*([\s\S]+)$/i);
+  return { by: undefined, note: legacy?.[1]?.trim() };
+};
+
+// Used when an admin re-sends the outcome to an employee. Must follow the
+// request's actual status - a rejected request previously went out worded as an
+// approval.
+const buildDecisionMessage = (
+  request: ExistingLeaveRequest,
+  employeeName: string,
+  approverName: string,
+  duration: string
+) => {
+  const isRejected = request.status === 'rejected';
+  const headline = isRejected
+    ? '❌ Leave Request Rejected'
+    : request.status === 'approved'
+      ? '✅ Leave Request Approved'
+      : '📋 Leave Request Update';
+  const outcome = isRejected
+    ? 'rejected'
+    : request.status === 'approved'
+      ? 'approved'
+      : 'reviewed';
+
+  return `${headline}
+
+Dear ${employeeName},
+
+Your leave request has been ${outcome} by ${approverName}.
+
+Details:
+📅 Period: ${duration}
+📝 Type: ${describeLeave(request)}
+💬 Your Reason: ${request.reason}
+📌 Status: ${request.status.toUpperCase()}${request.decision_note ? `\n💬 Admin's Note: ${request.decision_note}` : ''}
+
+${isRejected ? 'Please contact your admin if you have questions.' : 'Thank you for keeping us informed.'}`;
+};
+
+// "SL · FULL DAY" when a category is present, "FULL DAY" for older requests.
+const describeLeave = (request: { leave_type: string; leave_category?: string }) => {
+  const duration = request.leave_type.replace('_', ' ').toUpperCase();
+  return request.leave_category ? `${request.leave_category} · ${duration}` : duration;
+};
+
+const buildDecisionBlock = (action: 'approve' | 'reject', adminName: string, comment?: string) =>
+  `\n\n---\nDECISION: ${action === 'approve' ? 'APPROVED' : 'REJECTED'}` +
+  `\nDecided By: ${adminName}` +
+  `\nDecided At: ${new Date().toISOString()}` +
+  `\nDecision Note: ${comment?.trim() || (action === 'approve' ? 'Approved' : 'No reason provided')}`;
+
 interface LeaveRequestFormProps {
   userId: string;
+  policy: LeavePolicy;
+  /** The requesting user's own balances for the current leave year. */
+  balances: LeaveBalance[];
   onClose: () => void;
   onSubmit: () => void;
 }
@@ -36,6 +146,7 @@ interface LeaveRequestFormProps {
 interface ExistingLeaveRequest {
   id: string;
   leave_type: string;
+  leave_category?: string;
   start_date: string;
   end_date?: string;
   reason: string;
@@ -43,30 +154,23 @@ interface ExistingLeaveRequest {
   is_post_facto: boolean;
   requested_at: string;
   comments?: string;
+  decision_note?: string;
+  decided_by?: string;
   employee_name?: string;
   employee_department?: string;
   employee_id?: string;
   created_by?: string;
 }
 
-interface LeaveRequestMetadata {
-  leave_type?: string;
-  start_date?: string;
-  end_date?: string;
-  reason?: string;
-  is_post_facto?: boolean;
-  is_emergency?: boolean;
-  employee_id?: string;
-  employee_name?: string;
-  employee_department?: string;
-}
-
 const LeaveRequestForm: React.FC<LeaveRequestFormProps> = ({
   userId,
+  policy,
+  balances,
   onClose,
   onSubmit
 }) => {
   const [formData, setFormData] = useState({
+    leave_category: policy.types[0]?.code ?? '',
     leave_type: 'full_day',
     start_date: '',
     end_date: '',
@@ -75,6 +179,14 @@ const LeaveRequestForm: React.FC<LeaveRequestFormProps> = ({
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  // Live quota check for the chosen category. Over-quota requests are allowed
+  // through with a warning - the admin makes the final call.
+  const currentBalance = balances.find(b => b.code === formData.leave_category);
+  const requestedDays = formData.start_date ? leaveDaysForRequest(formData) : 0;
+  const exceedsQuota = !!currentBalance
+    && currentBalance.annual_quota > 0
+    && requestedDays > currentBalance.remaining;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,19 +238,24 @@ const LeaveRequestForm: React.FC<LeaveRequestFormProps> = ({
       const today = new Date();
       const isPostFacto = requestDate < today;
 
+      const selectedBalance = balances.find(b => b.code === formData.leave_category);
+      const balanceLine = selectedBalance
+        ? `\nBalance At Request: ${selectedBalance.code} ${formatBalance(selectedBalance)}${exceedsQuota ? ' (EXCEEDS QUOTA)' : ''}`
+        : '';
+
       // Create task assigned to admin for approval
       const { data: taskData, error: taskError } = await supabase
         .from('tasks')
         .insert([
           {
-            title: `Leave Request: ${userData.name} - ${formData.leave_type.replace('_', ' ').toUpperCase()}${isPostFacto ? ' (Post Facto)' : ''}`,
+            title: `Leave Request: ${userData.name} - ${formData.leave_category ? `${formData.leave_category} ` : ''}${formData.leave_type.replace('_', ' ').toUpperCase()}${isPostFacto ? ' (Post Facto)' : ''}`,
             description: `LEAVE REQUEST DETAILS:
 Employee: ${userData.name}
 Department: ${userData.department}
-Leave Type: ${formData.leave_type.replace('_', ' ').toUpperCase()}
+Leave Type: ${formData.leave_type.replace('_', ' ').toUpperCase()}${formData.leave_category ? `\nLeave Category: ${formData.leave_category}` : ''}
 Start Date: ${formData.start_date}${formData.end_date ? `\nEnd Date: ${formData.end_date}` : ''}
 Reason: ${formData.reason}
-Emergency: ${formData.is_emergency ? 'YES' : 'NO'}
+Emergency: ${formData.is_emergency ? 'YES' : 'NO'}${balanceLine}
 ${isPostFacto ? 'POST FACTO REQUEST: This leave has already been taken' : ''}
 
 Please review and approve/reject this leave request.`,
@@ -164,7 +281,7 @@ Please review and approve/reject this leave request.`,
         .single();
 
       if (adminWhatsApp?.whatsapp_number) {
-        const leaveTypeDisplay = formData.leave_type.replace('_', ' ').toUpperCase();
+        const leaveTypeDisplay = describeLeave(formData);
         const startDateFormatted = new Date(formData.start_date).toLocaleDateString();
         
         const adminMessage = `🔔 *New Leave Request*
@@ -173,9 +290,9 @@ Please review and approve/reject this leave request.`,
 🏢 *Department:* ${userData.department || 'Not specified'}
 📋 *Type:* ${leaveTypeDisplay}
 📅 *Date:* ${startDateFormatted}${formData.end_date ? ` - ${new Date(formData.end_date).toLocaleDateString()}` : ''}
-📝 *Reason:* ${formData.reason}
+📝 *Reason:* ${formData.reason}${selectedBalance ? `\n📊 *Balance:* ${selectedBalance.code} ${formatBalance(selectedBalance)}` : ''}
 ${formData.is_emergency ? '🚨 *EMERGENCY REQUEST*' : ''}
-${isPostFacto ? '⚠️ *POST FACTO REQUEST*' : ''}
+${isPostFacto ? '⚠️ *POST FACTO REQUEST*' : ''}${exceedsQuota ? '\n⚠️ *EXCEEDS YEARLY QUOTA*' : ''}
 
 Please review and approve/reject in the Task Manager app.`;
 
@@ -221,7 +338,33 @@ Please review and approve/reject in the Task Manager app.`;
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Leave Type
+              Leave Category
+            </label>
+            <select
+              value={formData.leave_category}
+              onChange={(e) => setFormData({ ...formData, leave_category: e.target.value })}
+              className="w-full border border-gray-300 rounded-md px-3 py-2"
+              required
+            >
+              {policy.types.map(type => {
+                const balance = balances.find(b => b.code === type.code);
+                return (
+                  <option key={type.code} value={type.code}>
+                    {type.code} - {type.name}{balance ? ` (${formatBalance(balance)})` : ''}
+                  </option>
+                );
+              })}
+            </select>
+            {currentBalance && currentBalance.pending > 0 && (
+              <p className="mt-1 text-xs text-gray-500">
+                {currentBalance.pending} day{currentBalance.pending === 1 ? '' : 's'} of {currentBalance.code} already awaiting approval.
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Duration
             </label>
             <select
               value={formData.leave_type}
@@ -296,6 +439,17 @@ Please review and approve/reject in the Task Manager app.`;
             </label>
           </div>
 
+          {exceedsQuota && currentBalance && (
+            <div className="flex items-start bg-orange-50 border border-orange-200 rounded-md p-2 text-orange-700 text-sm">
+              <HiExclamationCircle className="w-4 h-4 mr-1 mt-0.5 flex-shrink-0" />
+              <span>
+                This request needs {requestedDays} day{requestedDays === 1 ? '' : 's'} but you have only{' '}
+                {Math.max(0, currentBalance.remaining)} {currentBalance.code} left this leave year.
+                You can still submit it; the admin will decide.
+              </span>
+            </div>
+          )}
+
           {error && (
             <div className="text-red-600 text-sm">{error}</div>
           )}
@@ -343,6 +497,11 @@ const LeaveManagement: React.FC<{ userId: string; isAdmin?: boolean }> = ({
   const [approvalReason, setApprovalReason] = useState('');
   const [isProcessingApproval, setIsProcessingApproval] = useState(false);
 
+  // Organisation leave policy (SL/CL quotas) and who "me" is in the users table,
+  // so balances can be derived from the already-fetched requests.
+  const [policy, setPolicy] = useState<LeavePolicy>(() => parseLeavePolicy(null));
+  const [currentUserDbId, setCurrentUserDbId] = useState<string | null>(null);
+
   useEffect(() => {
     fetchLeaveRequests();
   }, [userId]);
@@ -354,7 +513,7 @@ const LeaveManagement: React.FC<{ userId: string; isAdmin?: boolean }> = ({
       // First get the current user's database ID
       const { data: userData, error: userError } = await supabase
         .from('users')
-        .select('id')
+        .select('id, organization_id')
         .eq('auth_id', userId)
         .maybeSingle();
 
@@ -364,12 +523,25 @@ const LeaveManagement: React.FC<{ userId: string; isAdmin?: boolean }> = ({
       }
 
       const dbUserId = userData.id;
+      setCurrentUserDbId(dbUserId);
+
+      if (userData.organization_id) {
+        const { data: orgData } = await supabase
+          .from('organizations')
+          .select('leave_policy')
+          .eq('id', userData.organization_id)
+          .maybeSingle();
+        setPolicy(parseLeavePolicy(orgData?.leave_policy));
+      }
 
       let query = supabase
         .from('tasks')
         .select('*')
+        // Match on the description marker as well as the title: the previous
+        // approval flow overwrote the title with the decision text, which hid
+        // every decided request from this list.
         .eq('type', 'personalTask')
-        .ilike('title', '%Leave Request%') // Filter by title to identify leave requests
+        .or('title.ilike."%Leave Request%",description.ilike."%LEAVE REQUEST DETAILS%"')
         .order('created_at', { ascending: false });
 
       if (isAdmin) {
@@ -384,31 +556,32 @@ const LeaveManagement: React.FC<{ userId: string; isAdmin?: boolean }> = ({
       if (error) throw error;
 
       const formattedRequests: ExistingLeaveRequest[] = (data || []).map(request => {
-        // Parse metadata if available
-        let metadata: LeaveRequestMetadata = {};
-        try {
-          metadata = request.metadata ? JSON.parse(request.metadata) : {};
-        } catch (e) {
-          // If parsing fails, use legacy format
-        }
+        const details = parseLeaveDetails(request.description || '');
+        const decision = parseDecision(request.description || '', request.title || '');
 
-        const isPostFacto = metadata.is_post_facto ||
-          (new Date(request.created_at) > new Date(metadata.start_date || request.due_date));
+        const startDate = details.start_date || request.due_date;
+        const isPostFacto = /POST FACTO/i.test(request.description || '') ||
+          (!!startDate && new Date(request.created_at) > new Date(startDate));
 
         return {
           id: request.id,
-          leave_type: metadata.leave_type || 'full_day', // Default to full_day if metadata missing
-          start_date: metadata.start_date || request.due_date,
-          end_date: metadata.end_date,
-          reason: metadata.reason || request.description || '',
+          leave_type: details.leave_type || 'full_day',
+          leave_category: details.leave_category,
+          start_date: startDate,
+          end_date: details.end_date,
+          reason: details.reason || request.description || '',
+          // 'rejected' is what whatsapp-approve-leave writes; 'cancelled' is what
+          // this screen and the performance report views use. Accept both, or a
+          // request rejected over WhatsApp silently reads back as pending.
           status: request.status === 'completed' ? 'approved' :
-            request.status === 'cancelled' ? 'rejected' : 'pending',
+            (request.status === 'cancelled' || request.status === 'rejected') ? 'rejected' : 'pending',
           is_post_facto: isPostFacto,
           requested_at: request.created_at,
           comments: request.title,
-          employee_name: metadata.employee_name,
-          employee_department: metadata.employee_department,
-          employee_id: metadata.employee_id,
+          decision_note: decision.note,
+          decided_by: decision.by,
+          employee_name: details.employee_name,
+          employee_department: details.employee_department,
           created_by: request.created_by
         };
       });
@@ -457,46 +630,60 @@ const LeaveManagement: React.FC<{ userId: string; isAdmin?: boolean }> = ({
         throw new Error('Leave request not found');
       }
 
+      // Resolve the acting admin first - their name goes into the decision trail.
+      const { data: currentUser } = await supabase.auth.getUser();
+      const { data: adminData } = await supabase
+        .from('users')
+        .select('name')
+        .eq('auth_id', currentUser?.user?.id)
+        .maybeSingle();
+
+      const adminName = adminData?.name || 'Admin';
+
+      // Re-read the description so the decision is appended to current content.
+      const { data: taskRow, error: taskReadError } = await supabase
+        .from('tasks')
+        .select('description')
+        .eq('id', requestId)
+        .single();
+
+      if (taskReadError) throw taskReadError;
+
       const status = action === 'approve' ? 'completed' : 'cancelled';
       const { error } = await supabase
         .from('tasks')
         .update({
           status,
           completed_at: action === 'approve' ? new Date().toISOString() : null,
-          title: `${action === 'approve' ? 'APPROVED' : 'REJECTED'}: ${comments || (action === 'approve' ? 'Leave request approved' : 'Leave request denied')}`
+          updated_at: new Date().toISOString(),
+          // The title is what identifies this row as a leave request, so the
+          // decision goes in the description instead of overwriting it.
+          description: `${taskRow?.description || ''}${buildDecisionBlock(action, adminName, comments)}`
         })
         .eq('id', requestId);
 
       if (error) throw error;
 
-      // Get employee's WhatsApp number and send notification
+      // Notify the employee of the decision
+      let notificationWarning = '';
+
       if (request.created_by) {
         const { data: employeeData } = await supabase
           .from('users')
           .select('whatsapp_number, name')
           .eq('id', request.created_by)
-          .single();
+          .maybeSingle();
 
-        if (employeeData?.whatsapp_number) {
-          // Get current admin's name
-          const { data: currentUser } = await supabase.auth.getUser();
-          const { data: adminData } = await supabase
-            .from('users')
-            .select('name')
-            .eq('auth_id', currentUser?.user?.id)
-            .single();
+        const leaveTypeDisplay = describeLeave(request);
+        const startDateFormatted = new Date(request.start_date).toLocaleDateString();
+        const endDateFormatted = request.end_date ? new Date(request.end_date).toLocaleDateString() : null;
 
-          const adminName = adminData?.name || 'Admin';
-          const leaveTypeDisplay = request.leave_type.replace('_', ' ').toUpperCase();
-          const startDateFormatted = new Date(request.start_date).toLocaleDateString();
-          const endDateFormatted = request.end_date ? new Date(request.end_date).toLocaleDateString() : null;
+        const statusEmoji = action === 'approve' ? '✅' : '❌';
+        const statusText = action === 'approve' ? 'APPROVED' : 'REJECTED';
 
-          const statusEmoji = action === 'approve' ? '✅' : '❌';
-          const statusText = action === 'approve' ? 'APPROVED' : 'REJECTED';
+        const employeeMessage = `${statusEmoji} *Leave Request ${statusText}*
 
-          const employeeMessage = `${statusEmoji} *Leave Request ${statusText}*
-
-Dear ${employeeData.name},
+Dear ${employeeData?.name || 'Colleague'},
 
 Your leave request has been *${statusText.toLowerCase()}* by ${adminName}.
 
@@ -507,24 +694,32 @@ ${comments ? `\n💬 *Admin's Comment:* ${comments}` : ''}
 
 ${action === 'approve' ? 'Enjoy your leave! 🌴' : 'Please contact your admin if you have questions.'}`;
 
-          // Create notification for employee - auto WhatsApp
-          await supabase
-            .from('notifications')
-            .insert({
-              user_id: request.created_by,
-              task_id: requestId,
-              type: action === 'approve' ? 'task_completed' : 'task_updated',
-              title: `Leave Request ${statusText}`,
-              message: `Your leave request for ${leaveTypeDisplay} on ${startDateFormatted} has been ${statusText.toLowerCase()}`,
-              whatsapp_number: employeeData.whatsapp_number,
-              ai_generated_message: employeeMessage,
-              whatsapp_sent: false
-            });
+        // Record the decision even when there is no WhatsApp number on file, so
+        // the employee is never left without any record of the outcome.
+        const { error: notifError } = await supabase
+          .from('notifications')
+          .insert({
+            user_id: request.created_by,
+            task_id: requestId,
+            type: action === 'approve' ? 'leave_request_approved' : 'leave_request_rejected',
+            title: `Leave Request ${statusText}`,
+            message: `Your leave request for ${leaveTypeDisplay} on ${startDateFormatted} has been ${statusText.toLowerCase()}${comments ? `. Reason: ${comments}` : ''}`,
+            whatsapp_number: employeeData?.whatsapp_number || null,
+            ai_generated_message: employeeMessage,
+            whatsapp_sent: false
+          });
+
+        if (notifError) {
+          console.error('Failed to create employee notification:', notifError);
+          notificationWarning = 'The decision was saved, but notifying the employee failed. Please inform them directly.';
+        } else if (!employeeData?.whatsapp_number) {
+          notificationWarning = 'The decision was saved, but this employee has no WhatsApp number on file, so no message could be sent.';
         }
       }
 
       // Close modal and refresh
       closeApprovalModal();
+      if (notificationWarning) alert(notificationWarning);
       await fetchLeaveRequests();
     } catch (error) {
       console.error('Error updating leave request:', error);
@@ -568,20 +763,7 @@ ${action === 'approve' ? 'Enjoy your leave! 🌴' : 'Please contact your admin i
       const endDate = request.end_date ? new Date(request.end_date).toLocaleDateString() : null;
       const duration = endDate ? `${startDate} to ${endDate}` : startDate;
 
-      // Create approval message
-      const message = `✅ Leave Request ${request.status === 'approved' ? 'Approved' : 'Update'}
-
-Dear ${employeeData.name},
-
-Your leave request has been ${request.status === 'approved' ? 'approved' : 'reviewed'} by ${approverName}.
-
-Details:
-📅 Period: ${duration}
-📝 Type: ${request.leave_type.replace('_', ' ').toUpperCase()}
-💬 Reason: ${request.reason}
-✅ Status: ${request.status.toUpperCase()}
-
-Thank you for keeping us informed.`;
+      const message = buildDecisionMessage(request, employeeData.name, approverName, duration);
 
       // Generate and open WhatsApp link
       const whatsappUrl = generateWhatsAppLink(employeeData.whatsapp_number, message);
@@ -628,8 +810,7 @@ Thank you for keeping us informed.`;
       const endDate = request.end_date ? new Date(request.end_date).toLocaleDateString() : null;
       const duration = endDate ? `${startDate} to ${endDate}` : startDate;
 
-      // Create approval message
-      const message = `✅ Leave Request Approved\n\nDear ${employeeData.name},\n\nYour leave request has been approved by ${approverName}.\n\nDetails:\n📅 Period: ${duration}\n📝 Type: ${request.leave_type.replace('_', ' ').toUpperCase()}\n💬 Reason: ${request.reason}\n\nStatus: APPROVED\n\nThank you for keeping us informed.`;
+      const message = buildDecisionMessage(request, employeeData.name, approverName, duration);
 
       // Send WhatsApp via backend
       const result = await sendWhatsAppMessage({
@@ -658,6 +839,23 @@ Thank you for keeping us informed.`;
   const pendingCount = leaveRequests.filter(r => r.status === 'pending').length;
   const approvedCount = leaveRequests.filter(r => r.status === 'approved').length;
   const postFactoCount = leaveRequests.filter(r => r.is_post_facto).length;
+
+  const leaveYear = getLeaveYear(policy);
+  const balancesFor = (dbUserId: string | null | undefined) =>
+    computeLeaveBalances(policy, leaveRequests.filter(r => !!dbUserId && r.created_by === dbUserId), leaveYear);
+  const myBalances = balancesFor(currentUserDbId);
+
+  // For the approval modal: the employee's balance as seen from the requests
+  // this admin can see. The request being decided is still pending, so it is
+  // not yet counted in `used`.
+  const pendingRequest = approvalModal.request;
+  const employeeBalance = pendingRequest?.leave_category
+    ? balancesFor(pendingRequest.created_by).find(b => b.code === pendingRequest.leave_category)
+    : undefined;
+  const pendingRequestDays = pendingRequest ? leaveDaysForRequest(pendingRequest) : 0;
+  const pendingExceedsQuota = !!employeeBalance
+    && employeeBalance.annual_quota > 0
+    && pendingRequestDays > employeeBalance.remaining;
 
   if (loading) {
     return (
@@ -728,6 +926,28 @@ Thank you for keeping us informed.`;
                 <p className="text-2xl font-semibold text-gray-900">{postFactoCount}</p>
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* My leave balances for the current leave year */}
+        <div className="bg-white p-4 rounded-lg shadow-sm mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-medium text-gray-700">My Leave Balance</p>
+            <p className="text-xs text-gray-500">Leave year {leaveYear.label}</p>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {myBalances.map(balance => (
+              <div key={balance.code} className="border border-gray-200 rounded-md p-3">
+                <p className="text-xs font-medium text-gray-500">{balance.code} · {balance.name}</p>
+                <p className={`text-lg font-semibold ${balance.annual_quota > 0 && balance.remaining <= 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                  {balance.annual_quota > 0 ? `${balance.remaining} / ${balance.annual_quota}` : `${balance.used} used`}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {balance.annual_quota > 0 ? 'days left' : 'no yearly limit set'}
+                  {balance.pending > 0 ? ` · ${balance.pending} pending` : ''}
+                </p>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -806,7 +1026,7 @@ Thank you for keeping us informed.`;
                       <div className="flex items-center">
                         <div>
                           <div className="text-sm font-medium text-gray-900">
-                            {request.leave_type.replace('_', ' ').toUpperCase()}
+                            {describeLeave(request)}
                           </div>
                           {request.is_post_facto && (
                             <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
@@ -840,10 +1060,18 @@ Thank you for keeping us informed.`;
                         )}
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="px-6 py-4">
                       <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(request.status)}`}>
                         {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
                       </span>
+                      {request.status !== 'pending' && request.decision_note && (
+                        <div className="mt-1 text-xs text-gray-600 max-w-xs whitespace-pre-wrap">
+                          {request.decision_note}
+                          {request.decided_by && (
+                            <span className="text-gray-400"> — {request.decided_by}</span>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {new Date(request.requested_at).toLocaleDateString()}
@@ -867,7 +1095,9 @@ Thank you for keeping us informed.`;
                               <HiX className="w-5 h-5" />
                             </button>
                           </div>
-                        ) : request.status === 'approved' ? (
+                        ) : (
+                          /* Decided requests (approved or rejected) can have the
+                             outcome re-sent to the employee. */
                           <div className="flex space-x-2">
                             {/* Direct WhatsApp Link - Opens WhatsApp app/web */}
                             <button
@@ -888,8 +1118,6 @@ Thank you for keeping us informed.`;
                               {sendingWhatsApp === request.id && <span className="ml-1 text-xs">...</span>}
                             </button>
                           </div>
-                        ) : (
-                          <span className="text-gray-400">-</span>
                         )}
                       </td>
                     )}
@@ -915,6 +1143,8 @@ Thank you for keeping us informed.`;
       {showForm && (
         <LeaveRequestForm
           userId={userId}
+          policy={policy}
+          balances={myBalances}
           onClose={() => setShowForm(false)}
           onSubmit={fetchLeaveRequests}
         />
@@ -963,8 +1193,15 @@ Thank you for keeping us informed.`;
                 <span className="font-medium">Employee:</span> {approvalModal.request.employee_name || 'Unknown'}
               </p>
               <p className="text-sm text-gray-600">
-                <span className="font-medium">Type:</span> {approvalModal.request.leave_type.replace('_', ' ').toUpperCase()}
+                <span className="font-medium">Type:</span> {describeLeave(approvalModal.request)}
               </p>
+              {employeeBalance && (
+                <p className="text-sm text-gray-600">
+                  <span className="font-medium">{employeeBalance.code} balance:</span>{' '}
+                  {formatBalance(employeeBalance)}
+                  {pendingRequestDays > 0 ? ` · this request uses ${pendingRequestDays}` : ''}
+                </p>
+              )}
               <p className="text-sm text-gray-600">
                 <span className="font-medium">Date:</span> {new Date(approvalModal.request.start_date).toLocaleDateString()}
                 {approvalModal.request.end_date && approvalModal.request.end_date !== approvalModal.request.start_date && (
@@ -977,6 +1214,11 @@ Thank you for keeping us informed.`;
               {approvalModal.request.is_post_facto && (
                 <span className="inline-flex items-center mt-2 px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
                   ⚠️ Post Facto Request
+                </span>
+              )}
+              {pendingExceedsQuota && employeeBalance && (
+                <span className="inline-flex items-center mt-2 ml-2 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                  ⚠️ Exceeds {employeeBalance.code} quota ({Math.max(0, employeeBalance.remaining)} left)
                 </span>
               )}
             </div>

@@ -69,7 +69,7 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, onRefresh, organizationSet
           <div className="flex items-center gap-2">
             <img src={dcpLogo} alt="DCP Logo" className="w-8 h-8 sm:w-10 sm:h-10" />
             {/* Hide organization name on small phones, show on tablets and desktop */}
-            <h1 className="hidden sm:block text-lg font-semibold">{organizationSettings?.name || 'Clinic Task Manager'}</h1>
+            <h1 className="hidden sm:block text-lg font-semibold">{organizationSettings?.name || 'Staff Management Solution'}</h1>
           </div>
         </div>
         

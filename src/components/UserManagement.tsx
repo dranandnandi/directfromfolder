@@ -9,10 +9,12 @@ import {
   HiPhone,
   HiOfficeBuilding,
   HiLockClosed,
-  HiShieldCheck
+  HiShieldCheck,
+  HiRefresh
 } from 'react-icons/hi';
 import { supabase } from '../utils/supabaseClient';
 import { authService, CreateUserData, UserProfile, UpdateProfileData } from '../services/authService';
+import { withDefaultDepartments } from '../constants/departments';
 
 interface UserManagementProps {
   adminUserId?: string;
@@ -27,6 +29,8 @@ const UserManagement: React.FC<UserManagementProps> = () => {
   const [organizationId, setOrganizationId] = useState<string | null>(null);
   const [departments, setDepartments] = useState<string[]>([]);
   const [currentUserRole, setCurrentUserRole] = useState<string>('user');
+  const [showDeactivated, setShowDeactivated] = useState(false);
+  const [restoringUserId, setRestoringUserId] = useState<string | null>(null);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -47,6 +51,17 @@ const UserManagement: React.FC<UserManagementProps> = () => {
   ];
   const [formError, setFormError] = useState<string | null>(null);
   const [formLoading, setFormLoading] = useState(false);
+
+  const getInitialFormData = () => ({
+    name: '',
+    email: '',
+    password: '',
+    whatsappNumber: '',
+    countryCode: '+91',
+    phone: '',
+    role: 'user' as 'user' | 'admin' | 'superadmin',
+    department: departments[0] || ''
+  });
 
   useEffect(() => {
     initializeUserManagement();
@@ -88,7 +103,7 @@ const UserManagement: React.FC<UserManagementProps> = () => {
         .single();
 
       if (orgError) throw orgError;
-      setDepartments(orgData?.departments || ['Management', 'Medical', 'Nursing']);
+      setDepartments(withDefaultDepartments(orgData?.departments));
 
       // Fetch all users in the organization
       await fetchUsers(userData.organization_id);
@@ -159,16 +174,7 @@ const UserManagement: React.FC<UserManagementProps> = () => {
     } else {
       // Create mode
       setSelectedUser(null);
-      setFormData({
-        name: '',
-        email: '',
-        password: '',
-        whatsappNumber: '',
-        countryCode: '+91',
-        phone: '',
-        role: 'user',
-        department: departments[0] || ''
-      });
+      setFormData(getInitialFormData());
     }
     setFormError(null);
     setShowModal(true);
@@ -177,6 +183,7 @@ const UserManagement: React.FC<UserManagementProps> = () => {
   const handleCloseModal = () => {
     setShowModal(false);
     setSelectedUser(null);
+    setFormData(getInitialFormData());
     setFormError(null);
   };
 
@@ -205,6 +212,21 @@ const UserManagement: React.FC<UserManagementProps> = () => {
     }
     if (!selectedUser && formData.password.length < 6) {
       setFormError('Password must be at least 6 characters');
+      return false;
+    }
+    if (selectedUser && formData.password && formData.password.length < 6) {
+      setFormError('New password must be at least 6 characters');
+      return false;
+    }
+
+    if (!selectedUser && !formData.phone.trim()) {
+      setFormError('Phone number is required for new users');
+      return false;
+    }
+
+    const normalizedPhone = formData.phone.trim();
+    if (normalizedPhone && !/^\+?\d{7,15}$/.test(normalizedPhone)) {
+      setFormError('Phone number must contain only digits and be 7 to 15 digits long');
       return false;
     }
 
@@ -247,12 +269,16 @@ const UserManagement: React.FC<UserManagementProps> = () => {
         const updates: UpdateProfileData = {
           name: formData.name,
           whatsappNumber: formData.countryCode + formData.whatsappNumber,
-          phone: formData.phone,
+          phone: formData.phone.trim(),
           department: formData.department,
           role: formData.role
         };
 
         await authService.updateProfile(selectedUser.id, updates);
+
+        if (formData.password) {
+          await authService.resetUserPassword(selectedUser.id, formData.password);
+        }
         
         // Refresh users list
         await fetchUsers(organizationId);
@@ -263,10 +289,10 @@ const UserManagement: React.FC<UserManagementProps> = () => {
         // Create new user
         const userData: CreateUserData = {
           name: formData.name,
-          email: formData.email,
+          email: formData.email.trim(),
           password: formData.password,
           whatsappNumber: formData.countryCode + formData.whatsappNumber,
-          phone: formData.phone,
+          phone: formData.phone.trim(),
           role: formData.role,
           department: formData.department,
           organizationId: organizationId
@@ -308,6 +334,27 @@ const UserManagement: React.FC<UserManagementProps> = () => {
     }
   };
 
+  const handleRestoreUser = async (user: UserProfile) => {
+    if (!confirm(`Restore ${user.name}? They will be able to log in again with their existing password.`)) {
+      return;
+    }
+
+    setRestoringUserId(user.id);
+    try {
+      await authService.restoreUser(user.id);
+
+      if (organizationId) {
+        await fetchUsers(organizationId);
+      }
+      alert('User restored successfully!');
+    } catch (error: any) {
+      console.error('Error restoring user:', error);
+      alert(`Failed to restore user: ${error.message}`);
+    } finally {
+      setRestoringUserId(null);
+    }
+  };
+
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
       case 'superadmin':
@@ -318,6 +365,10 @@ const UserManagement: React.FC<UserManagementProps> = () => {
         return 'bg-gray-100 text-gray-800';
     }
   };
+
+  const activeUsers = users.filter(user => user.is_active);
+  const deactivatedUsers = users.filter(user => !user.is_active);
+  const displayedUsers = showDeactivated ? deactivatedUsers : activeUsers;
 
   if (loading) {
     return (
@@ -359,13 +410,13 @@ const UserManagement: React.FC<UserManagementProps> = () => {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-white p-4 rounded-lg shadow">
             <div className="flex items-center">
               <HiUser className="w-8 h-8 text-blue-500" />
               <div className="ml-3">
-                <p className="text-sm font-medium text-gray-500">Total Users</p>
-                <p className="text-2xl font-semibold text-gray-900">{users.length}</p>
+                <p className="text-sm font-medium text-gray-500">Active Users</p>
+                <p className="text-2xl font-semibold text-gray-900">{activeUsers.length}</p>
               </div>
             </div>
           </div>
@@ -375,7 +426,7 @@ const UserManagement: React.FC<UserManagementProps> = () => {
               <div className="ml-3">
                 <p className="text-sm font-medium text-gray-500">Admins</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  {users.filter(u => u.role === 'admin' || u.role === 'superadmin').length}
+                  {activeUsers.filter(u => u.role === 'admin' || u.role === 'superadmin').length}
                 </p>
               </div>
             </div>
@@ -389,10 +440,43 @@ const UserManagement: React.FC<UserManagementProps> = () => {
               </div>
             </div>
           </div>
+          <div className="bg-white p-4 rounded-lg shadow">
+            <div className="flex items-center">
+              <HiTrash className="w-8 h-8 text-red-500" />
+              <div className="ml-3">
+                <p className="text-sm font-medium text-gray-500">Deactivated</p>
+                <p className="text-2xl font-semibold text-gray-900">{deactivatedUsers.length}</p>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Users Table */}
         <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="flex border-b border-gray-200 px-4 pt-3">
+            <button
+              type="button"
+              onClick={() => setShowDeactivated(false)}
+              className={`px-4 py-3 text-sm font-medium border-b-2 ${
+                !showDeactivated
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Active ({activeUsers.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowDeactivated(true)}
+              className={`px-4 py-3 text-sm font-medium border-b-2 ${
+                showDeactivated
+                  ? 'border-red-600 text-red-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Deactivated ({deactivatedUsers.length})
+            </button>
+          </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
@@ -418,8 +502,8 @@ const UserManagement: React.FC<UserManagementProps> = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {users.map((user) => (
-                  <tr key={user.id} className="hover:bg-gray-50">
+                {displayedUsers.map((user) => (
+                  <tr key={user.id} className={showDeactivated ? 'bg-gray-50' : 'hover:bg-gray-50'}>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         <div className="flex-shrink-0 h-10 w-10 bg-blue-100 rounded-full flex items-center justify-center">
@@ -449,20 +533,34 @@ const UserManagement: React.FC<UserManagementProps> = () => {
                       {new Date(user.created_at).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button
-                        onClick={() => handleOpenModal(user)}
-                        className="text-blue-600 hover:text-blue-900 mr-4"
-                        title="Edit"
-                      >
-                        <HiPencil className="w-5 h-5" />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteUser(user)}
-                        className="text-red-600 hover:text-red-900"
-                        title="Delete"
-                      >
-                        <HiTrash className="w-5 h-5" />
-                      </button>
+                      {showDeactivated ? (
+                        <button
+                          onClick={() => handleRestoreUser(user)}
+                          disabled={restoringUserId === user.id}
+                          className="inline-flex items-center text-green-600 hover:text-green-900 disabled:text-gray-400"
+                          title="Restore user"
+                        >
+                          <HiRefresh className="w-5 h-5 mr-1" />
+                          {restoringUserId === user.id ? 'Restoring...' : 'Restore'}
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => handleOpenModal(user)}
+                            className="text-blue-600 hover:text-blue-900 mr-4"
+                            title="Edit"
+                          >
+                            <HiPencil className="w-5 h-5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteUser(user)}
+                            className="text-red-600 hover:text-red-900"
+                            title="Deactivate"
+                          >
+                            <HiTrash className="w-5 h-5" />
+                          </button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -470,22 +568,28 @@ const UserManagement: React.FC<UserManagementProps> = () => {
             </table>
           </div>
 
-          {users.length === 0 && (
+          {displayedUsers.length === 0 && (
             <div className="text-center py-12">
               <HiUser className="mx-auto h-12 w-12 text-gray-400" />
-              <h3 className="mt-2 text-sm font-medium text-gray-900">No users</h3>
+              <h3 className="mt-2 text-sm font-medium text-gray-900">
+                {showDeactivated ? 'No deactivated users' : 'No active users'}
+              </h3>
               <p className="mt-1 text-sm text-gray-500">
-                Get started by adding a new user to your organization.
+                {showDeactivated
+                  ? 'Deactivated users will appear here and can be restored.'
+                  : 'Get started by adding a new user to your organization.'}
               </p>
-              <div className="mt-6">
-                <button
-                  onClick={() => handleOpenModal()}
-                  className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
-                >
-                  <HiPlus className="-ml-1 mr-2 h-5 w-5" />
-                  Add User
-                </button>
-              </div>
+              {!showDeactivated && (
+                <div className="mt-6">
+                  <button
+                    onClick={() => handleOpenModal()}
+                    className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                  >
+                    <HiPlus className="-ml-1 mr-2 h-5 w-5" />
+                    Add User
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -538,6 +642,9 @@ const UserManagement: React.FC<UserManagementProps> = () => {
                 </label>
                 <input
                   type="email"
+                  name={selectedUser ? 'edit-user-email' : 'new-user-email'}
+                  autoComplete="off"
+                  key={selectedUser ? `edit-email-${selectedUser.id}` : 'new-email'}
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   disabled={!!selectedUser}
@@ -550,21 +657,24 @@ const UserManagement: React.FC<UserManagementProps> = () => {
               </div>
 
               {/* Password */}
-              {!selectedUser && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    <HiLockClosed className="inline w-4 h-4 mr-1" />
-                    Password <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="password"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Minimum 6 characters"
-                  />
-                </div>
-              )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <HiLockClosed className="inline w-4 h-4 mr-1" />
+                  {selectedUser ? 'New Password' : 'Password'} {!selectedUser && <span className="text-red-500">*</span>}
+                </label>
+                <input
+                  type="password"
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                  placeholder={selectedUser ? 'Leave blank to keep current password' : 'Minimum 6 characters'}
+                />
+                {selectedUser && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Entering a value will immediately replace this user's login password.
+                  </p>
+                )}
+              </div>
 
               {/* WhatsApp Number */}
               <div>
@@ -630,19 +740,21 @@ const UserManagement: React.FC<UserManagementProps> = () => {
                 </p>
               </div>
 
-              {/* Phone (Optional) */}
+              {/* Phone Number */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   <HiPhone className="inline w-4 h-4 mr-1" />
-                  Phone Number (Optional)
+                  Phone Number {!selectedUser && <span className="text-red-500">*</span>}
                 </label>
                 <input
                   type="tel"
+                  name={selectedUser ? 'edit-user-phone' : 'new-user-phone'}
+                  autoComplete="off"
                   value={formData.phone}
                   onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                   disabled={formLoading}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
-                  placeholder="Alternate phone number"
+                  placeholder={selectedUser ? 'Phone number' : 'Phone number required for login setup'}
                 />
               </div>
 

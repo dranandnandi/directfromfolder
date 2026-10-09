@@ -217,6 +217,7 @@ CREATE OR REPLACE FUNCTION get_pending_whatsapp_notifications(limit_count intege
 RETURNS TABLE(
   id uuid,
   user_id uuid,
+  organization_id uuid,
   task_id uuid,
   type text,
   title text,
@@ -232,6 +233,7 @@ BEGIN
   SELECT 
     n.id,
     n.user_id,
+    u.organization_id,
     n.task_id,
     n.type,
     n.title,
@@ -242,6 +244,7 @@ BEGIN
     n.org_auto_alerts_enabled,
     n.created_at
   FROM notifications n
+  JOIN users u ON u.id = n.user_id
   WHERE n.org_whatsapp_enabled = true
     AND n.org_auto_alerts_enabled = true
     AND n.whatsapp_number IS NOT NULL

@@ -26,6 +26,8 @@ const WhatsAppSettingsForm: React.FC<WhatsAppSettingsFormProps> = ({ onClose }) 
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  const [testNumber, setTestNumber] = useState('');
+  const [adminUserId, setAdminUserId] = useState('');
 
   useEffect(() => {
     fetchOrganizationSettings();
@@ -42,7 +44,7 @@ const WhatsAppSettingsForm: React.FC<WhatsAppSettingsFormProps> = ({ onClose }) 
 
       const { data: user, error: profileError } = await supabase
         .from('users')
-        .select('organization_id, role')
+        .select('id, organization_id, role, whatsapp_number')
         .eq('auth_id', userData.user.id)
         .single();
 
@@ -63,11 +65,17 @@ const WhatsAppSettingsForm: React.FC<WhatsAppSettingsFormProps> = ({ onClose }) 
 
       if (orgError) throw orgError;
 
+      // Default the test send to the admin's own number rather than a fixed one.
+      setTestNumber(user.whatsapp_number || '');
+      // The bridge resolves the sending session from the org's registered HR
+      // admins, so name the admin running the test.
+      setAdminUserId(user.id);
+
       setSettings({
         id: orgData.id,
         whatsapp_enabled: orgData.whatsapp_enabled || false,
         auto_alerts_enabled: orgData.auto_alerts_enabled || false,
-        whatsapp_api_endpoint: orgData.whatsapp_api_endpoint || 'http://134.209.145.186:3001/api/send-message',
+        whatsapp_api_endpoint: orgData.whatsapp_api_endpoint || '',
         whatsapp_settings: {
           priority_high: true,
           priority_medium: true,
@@ -97,7 +105,8 @@ const WhatsAppSettingsForm: React.FC<WhatsAppSettingsFormProps> = ({ onClose }) 
         .update({
           whatsapp_enabled: settings.whatsapp_enabled,
           auto_alerts_enabled: settings.auto_alerts_enabled,
-          whatsapp_api_endpoint: settings.whatsapp_api_endpoint,
+          // Empty means "fall back to the WHATSAPP_API_URL edge-function secret".
+          whatsapp_api_endpoint: settings.whatsapp_api_endpoint.trim() || null,
           whatsapp_settings: settings.whatsapp_settings,
           updated_at: new Date().toISOString()
         })
@@ -118,15 +127,26 @@ const WhatsAppSettingsForm: React.FC<WhatsAppSettingsFormProps> = ({ onClose }) 
   const testWhatsAppConnection = async () => {
     if (!settings) return;
 
+    const recipient = testNumber.trim();
+    if (!recipient) {
+      setError('Enter a WhatsApp number to send the test message to.');
+      return;
+    }
+
     try {
       setTestStatus('testing');
-      
+      setError(null);
+
       const testMessage = 'WhatsApp Integration Test - Organization Settings Verification ✅';
-      
+
       const { data, error } = await supabase.functions.invoke('send-whatsapp', {
         body: {
-          phoneNumber: '+919909249725', // Use a test number
+          phoneNumber: recipient,
           message: testMessage,
+          // Required by send-whatsapp: with no notificationId to derive it from,
+          // the org must be named explicitly or the request is rejected.
+          organizationId: settings.id,
+          userId: adminUserId,
           testMessage: true
         }
       });
@@ -261,10 +281,11 @@ const WhatsAppSettingsForm: React.FC<WhatsAppSettingsFormProps> = ({ onClose }) 
             })}
             disabled={!settings.whatsapp_enabled}
             className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
-            placeholder="http://134.209.145.186:3001/api/send-message"
+            placeholder="Leave blank to use the default server endpoint"
           />
           <p className="text-sm text-gray-600">
-            Custom WhatsApp API endpoint for your organization
+            Optional override. Leave blank unless this organization uses its own
+            WhatsApp server — a wrong value here silently breaks all sending.
           </p>
         </div>
 
@@ -378,7 +399,15 @@ const WhatsAppSettingsForm: React.FC<WhatsAppSettingsFormProps> = ({ onClose }) 
       </div>
 
       {/* Action Buttons */}
-      <div className="flex items-center justify-between pt-6 border-t border-gray-200">
+      <div className="flex flex-wrap items-center gap-3 pt-6 border-t border-gray-200">
+        <input
+          type="tel"
+          value={testNumber}
+          onChange={(e) => setTestNumber(e.target.value)}
+          disabled={!settings.whatsapp_enabled}
+          placeholder="+919876543210"
+          className="px-3 py-2 border border-gray-300 rounded-md text-sm shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
+        />
         <button
           onClick={testWhatsAppConnection}
           disabled={!settings.whatsapp_enabled || testStatus === 'testing'}
@@ -393,13 +422,13 @@ const WhatsAppSettingsForm: React.FC<WhatsAppSettingsFormProps> = ({ onClose }) 
           {testStatus === 'testing' ? 'Testing...' : 
            testStatus === 'success' ? '✅ Test Successful' :
            testStatus === 'error' ? '❌ Test Failed' : 
-           'Test Connection'}
+           'Send Test Message'}
         </button>
 
         <button
           onClick={handleSaveSettings}
           disabled={saving}
-          className="px-6 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+          className="ml-auto px-6 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
         >
           {saving ? 'Saving...' : 'Save Settings'}
         </button>

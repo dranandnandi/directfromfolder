@@ -20,6 +20,7 @@ interface DashboardProps {
 
 type FilterType = 'all' | 'overdue' | 'due-tomorrow' | 'upcoming' | 'completed' | 'regular' | 'sample-tracking' | 'quality-control' | 'personal';
 type StatusFilterType = 'all-status' | 'new' | 'inProgress' | 'completed' | 'overdue';
+type AssigneeFilterType = 'all-assignees' | string;
 
 const SummaryCard = ({ icon: Icon, title, value, color, subtitle, onClick }: any) => (
   <div 
@@ -56,8 +57,10 @@ const generateWhatsAppLink = (phoneNumber: string, message: string) => {
 const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTasks, onAddTask, onEditTask, onTaskUpdate, teamMembers, selectedTask, setSelectedTask }) => {
   const [filterType, setFilterType] = useState<FilterType>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilterType>('all-status');
+  const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilterType>('all-assignees');
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [showStatusFilterDropdown, setShowStatusFilterDropdown] = useState(false);
+  const [showAssigneeFilterDropdown, setShowAssigneeFilterDropdown] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const previousTasksRef = useRef<Task[]>([]);
   const previousPersonalTasksRef = useRef<Task[]>([]);
@@ -96,6 +99,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
       if (!target.closest('[data-dropdown]')) {
         setShowFilterDropdown(false);
         setShowStatusFilterDropdown(false);
+        setShowAssigneeFilterDropdown(false);
       }
     };
 
@@ -178,7 +182,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
 
       let dueDate = 'upcoming';
       
-      if (task.type === TaskType.PatientTracking) {
+      if (task.type === TaskType.ClientTracking) {
         const createdDate = new Date(task.createdAt);
         const hoursToAdd = task.hoursToComplete || 4;
         const dueTime = new Date(createdDate.getTime() + hoursToAdd * 60 * 60 * 1000);
@@ -218,7 +222,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
 
   const getFilteredTasks = () => {
     let allTasks = [...tasks, ...personalTasks];
-    
+
     // Apply search filter
     if (searchTerm) {
       const searchLower = searchTerm.toLowerCase();
@@ -229,7 +233,14 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
         task.assignees?.[0]?.name.toLowerCase().includes(searchLower)
       );
     }
-    
+
+    // Apply assignee filter
+    if (assigneeFilter !== 'all-assignees') {
+      allTasks = allTasks.filter(task =>
+        task.assignees?.some(a => a.id === assigneeFilter)
+      );
+    }
+
     // Apply status filter
     if (statusFilter !== 'all-status') {
       allTasks = allTasks.filter(task => {
@@ -265,7 +276,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
       case 'regular':
         return groupTasks(allTasks.filter(t => t.type === TaskType.RegularTask));
       case 'sample-tracking':
-        return groupTasks(allTasks.filter(t => t.type === TaskType.PatientTracking));
+        return groupTasks(allTasks.filter(t => t.type === TaskType.ClientTracking));
       case 'quality-control':
         return groupTasks(allTasks.filter(t => t.type === TaskType.AuditTask));
       case 'personal':
@@ -276,7 +287,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
   }; 
 
   // Memoize the filtered tasks to prevent unnecessary recalculations
-  const filteredTaskGroups = useMemo(() => getFilteredTasks(), [tasks, personalTasks, filterType, statusFilter, searchTerm]);
+  const filteredTaskGroups = useMemo(() => getFilteredTasks(), [tasks, personalTasks, filterType, statusFilter, assigneeFilter, searchTerm]);
 
   const getTaskCounts = () => {
     const allTasks = [...tasks, ...personalTasks];
@@ -362,13 +373,13 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
                 'px-2 py-1 rounded-full text-xs font-medium',
                 {
                   'bg-purple-100 text-purple-700': task.type === TaskType.RegularTask,
-                  'bg-blue-100 text-blue-700': task.type === TaskType.PatientTracking,
+                  'bg-blue-100 text-blue-700': task.type === TaskType.ClientTracking,
                   'bg-green-100 text-green-700': task.type === TaskType.AuditTask,
                   'bg-gray-100 text-gray-700': task.type === TaskType.PersonalTask
                 }
               )}>
                 {task.type === TaskType.RegularTask && 'Regular Task'}
-                {task.type === TaskType.PatientTracking && 'Patient Tracking'}
+                {task.type === TaskType.ClientTracking && 'Client Tracking'}
                 {task.type === TaskType.AuditTask && 'Audit Task'}
                 {task.type === TaskType.PersonalTask && 'Personal'}
               </span>
@@ -386,7 +397,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
             )}
           </div>
 
-          {(task.type === TaskType.PatientTracking && task.hoursToComplete) && (
+          {(task.type === TaskType.ClientTracking && task.hoursToComplete) && (
             <div className="text-xs text-orange-600 mt-2 flex items-center gap-1">
               <HiClock className="w-3 h-3" />
               Complete within: {task.hoursToComplete} hours
@@ -428,7 +439,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
     { value: 'upcoming', label: 'Upcoming', count: counts.upcoming },
     { value: 'completed', label: 'Completed', count: counts.completed },
     { value: 'regular', label: 'Regular Tasks', count: tasks.filter(t => t.type === TaskType.RegularTask).length },
-    { value: 'sample-tracking', label: 'Patient Tracking', count: tasks.filter(t => t.type === TaskType.PatientTracking).length },
+    { value: 'sample-tracking', label: 'Client Tracking', count: tasks.filter(t => t.type === TaskType.ClientTracking).length },
     { value: 'quality-control', label: 'Audit Task', count: tasks.filter(t => t.type === TaskType.AuditTask).length },
     { value: 'personal', label: 'Personal Tasks', count: personalTasks.length }
   ];
@@ -516,11 +527,11 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
                 Add Regular Task
               </button>
               <button 
-                onClick={() => onAddTask(TaskType.PatientTracking)}
+                onClick={() => onAddTask(TaskType.ClientTracking)}
                 className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2 transition-colors shadow-sm"
               >
                 <HiPlus className="w-4 h-4" />
-                Patient Tracking
+                Client Tracking
               </button>
               <button 
                 onClick={() => onAddTask(TaskType.AuditTask)}
@@ -588,6 +599,55 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
                 )}
               </div>
 
+              {/* Assignee Filter Dropdown */}
+              {teamMembers.length > 0 && (
+                <div className="relative" data-dropdown>
+                  <button
+                    onClick={() => setShowAssigneeFilterDropdown(!showAssigneeFilterDropdown)}
+                    className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                  >
+                    <HiFilter className="w-4 h-4" />
+                    <span className="text-sm font-medium">
+                      {assigneeFilter === 'all-assignees'
+                        ? 'All Assignees'
+                        : teamMembers.find(m => m.id === assigneeFilter)?.name ?? 'Assignee'}
+                    </span>
+                    <HiChevronDown className="w-4 h-4" />
+                  </button>
+
+                  {showAssigneeFilterDropdown && (
+                    <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 z-20 max-h-60 overflow-y-auto">
+                      <div className="py-2">
+                        <button
+                          onClick={() => { setAssigneeFilter('all-assignees'); setShowAssigneeFilterDropdown(false); }}
+                          className={clsx(
+                            'w-full text-left px-4 py-2 text-sm hover:bg-gray-50 transition-colors',
+                            assigneeFilter === 'all-assignees' && 'bg-blue-50 text-blue-700'
+                          )}
+                        >
+                          All Assignees
+                        </button>
+                        {teamMembers.map(member => (
+                          <button
+                            key={member.id}
+                            onClick={() => { setAssigneeFilter(member.id); setShowAssigneeFilterDropdown(false); }}
+                            className={clsx(
+                              'w-full text-left px-4 py-2 text-sm hover:bg-gray-50 transition-colors',
+                              assigneeFilter === member.id && 'bg-blue-50 text-blue-700'
+                            )}
+                          >
+                            {member.name}
+                            {member.department && (
+                              <span className="text-gray-400 text-xs ml-1">({member.department})</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Status Filter Dropdown */}
               <div className="relative" data-dropdown>
                 <button
@@ -595,7 +655,7 @@ const Dashboard: React.FC<DashboardProps> = ({ currentUserId, tasks, personalTas
                   className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
                 >
                   <span className="text-sm font-medium">
-                    {statusFilter === 'all-status' ? 'All Status' : 
+                    {statusFilter === 'all-status' ? 'All Status' :
                      statusFilter === 'new' ? 'New' :
                      statusFilter === 'inProgress' ? 'In Progress' :
                      statusFilter === 'completed' ? 'Completed' : 'Overdue'}

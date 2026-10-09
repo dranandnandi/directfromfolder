@@ -206,10 +206,10 @@ const TaskModal: React.FC<TaskModalProps> = ({
         isRecurring: mainTask.isRecurring,
         
         // Task-specific fields - only include for relevant task types
-        patientId: (mainTask.type === TaskType.PatientTracking) ? mainTask.patientId : undefined,
+        patientId: (mainTask.type === TaskType.ClientTracking) ? mainTask.patientId : undefined,
         location: mainTask.location || undefined,
         roundType: mainTask.type === TaskType.AuditTask ? mainTask.roundType : undefined,
-        followUpType: mainTask.type === TaskType.PatientTracking ? mainTask.followUpType : undefined,
+        followUpType: mainTask.type === TaskType.ClientTracking ? mainTask.followUpType : undefined,
         advisoryType: mainTask.type === TaskType.RegularTask ? mainTask.advisoryType : undefined,
         manualWhatsappNumber: mainTask.manualWhatsappNumber || undefined,
         contactNumber: mainTask.contactNumber || undefined,
@@ -231,20 +231,20 @@ const TaskModal: React.FC<TaskModalProps> = ({
 
   const renderTaskSpecificFields = () => {
     switch (mainTask.type) {
-      case TaskType.PatientTracking:
+      case TaskType.ClientTracking:
         return (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Patient ID <span className="text-red-500">*</span>
+                  Reference ID <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
                   value={mainTask.patientId}
                   onChange={(e) => setMainTask({ ...mainTask, patientId: e.target.value })}
                   className="w-full px-3 py-3 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 text-base"
-                  placeholder="Enter patient ID"
+                  placeholder="Enter reference ID"
                   required
                 />
               </div>
@@ -258,7 +258,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
                   value={mainTask.location}
                   onChange={(e) => setMainTask({ ...mainTask, location: e.target.value })}
                   className="w-full px-3 py-3 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 text-base"
-                  placeholder="Ward/Room number"
+                  placeholder="Site/Room number"
                 />
               </div>
             </div>
@@ -435,7 +435,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
                 required
               >
                 <option value={TaskType.RegularTask}>Add Regular Task</option>
-                <option value={TaskType.PatientTracking}>Patient Tracking</option>
+                <option value={TaskType.ClientTracking}>Client Tracking</option>
                 <option value={TaskType.AuditTask}>Audit Task</option>
                 <option value={TaskType.PersonalTask}>Personal Task</option>
               </select>

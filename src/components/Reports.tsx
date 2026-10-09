@@ -62,7 +62,8 @@ const Reports = () => {
             id,
             name,
             department,
-            role
+            role,
+            is_active
           )
         `)
         .eq('organization_id', userData.organization_id);
@@ -87,7 +88,10 @@ const Reports = () => {
       const { data, error } = await query;
       if (error) throw error;
 
-      setTasks(data || []);
+      setTasks((data || []).filter((task: any) => {
+        const assignee = Array.isArray(task.assigned_to) ? task.assigned_to[0] : task.assigned_to;
+        return !task.assigned_to || assignee?.is_active !== false;
+      }));
     } catch (error: any) {
       console.error('Error fetching tasks:', error);
       setError(error.message);
@@ -227,7 +231,7 @@ const Reports = () => {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={[
                     { name: 'Regular Tasks', count: tasks.filter(t => t.type === TaskType.RegularTask).length },
-                    { name: 'Patient Tracking', count: tasks.filter(t => t.type === TaskType.PatientTracking).length },
+                    { name: 'Client Tracking', count: tasks.filter(t => t.type === TaskType.ClientTracking).length },
                     { name: 'Audit Task', count: tasks.filter(t => t.type === TaskType.AuditTask).length },
                     { name: 'Personal Task', count: tasks.filter(t => t.type === TaskType.PersonalTask).length }
                   ]}>

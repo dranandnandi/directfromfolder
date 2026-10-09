@@ -81,7 +81,7 @@ export function extractJsonObject(text: string) {
 export async function anthropic(
   system: string,
   userText: string,
-  model = "claude-3-5-haiku-20241022",
+  model = "claude-haiku-4-5",
 ) {
   const key = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
   if (!key) throw new Error("Missing ANTHROPIC_API_KEY");

@@ -1,0 +1,707 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Staff Management — Evaluation Brochure</title>
+<style>
+/* ─────────────────────────────────────────────────────────
+   PALETTE — drawn from the attendance register itself.
+   ledger ivory · register ink · attestation green ·
+   brass (the punch clock) · ruled line · vermilion (RESERVED
+   for the loss beat, used nowhere else on the page)
+   ───────────────────────────────────────────────────────── */
+:root{
+  --ledger:#FBF7EE; --surface:#FFFFFF;
+  --ink:#16241F; --ink-soft:#4C5C54; --ink-faint:#7A8880;
+  --seal:#0B5B4A; --seal-tint:#E6EFEA;
+  --brass:#8A5A12; --brass-tint:#F6EEDD;
+  --rule:#D9CEB8;
+  --vermilion:#A81F27; --vermilion-tint:#FBEDEC;
+
+  --display:ui-sans-serif,system-ui,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --body:ui-sans-serif,system-ui,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --ledger-type:ui-monospace,"Cascadia Mono",Consolas,"Liberation Mono",Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ledger:#0F1512;--surface:#18211D;--ink:#EAE6DA;--ink-soft:#9CAAA1;
+    --ink-faint:#71807A;--seal:#4FB79B;--seal-tint:#16302A;--brass:#D9A441;
+    --brass-tint:#241D0F;--rule:#2B3730;--vermilion:#EE7A80;--vermilion-tint:#2A1618;
+  }
+}
+:root[data-theme="dark"]{
+  --ledger:#0F1512;--surface:#18211D;--ink:#EAE6DA;--ink-soft:#9CAAA1;
+  --ink-faint:#71807A;--seal:#4FB79B;--seal-tint:#16302A;--brass:#D9A441;
+  --brass-tint:#241D0F;--rule:#2B3730;--vermilion:#EE7A80;--vermilion-tint:#2A1618;
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--ledger);color:var(--ink);
+  font-family:var(--body);font-size:10.3pt;line-height:1.5;
+  -webkit-font-smoothing:antialiased}
+.page{width:210mm;margin:0 auto;padding:15mm 17mm 13mm;background:var(--surface)}
+@media screen{
+  body{padding:26px 12px}
+  .page{box-shadow:0 1px 3px rgba(0,0,0,.14),0 20px 50px rgba(0,0,0,.10);max-width:100%}
+}
+
+.mast{display:flex;justify-content:space-between;align-items:baseline;gap:8mm;
+  border-bottom:2pt solid var(--seal);padding-bottom:3mm}
+.wordmark{font-family:var(--display);font-weight:700;font-size:12.5pt;
+  letter-spacing:.15em;text-transform:uppercase;color:var(--seal)}
+.kicker{font-family:var(--ledger-type);font-size:7.2pt;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-soft);text-align:right;line-height:1.6}
+
+.hook{font-family:var(--display);font-weight:800;font-size:33pt;line-height:1.02;
+  letter-spacing:-.024em;margin:8mm 0 0;break-inside:avoid}
+.hook em{font-style:normal;color:var(--seal)}
+.standfirst{margin:5mm 0 0;font-size:12.6pt;line-height:1.42;font-weight:500;max-width:152mm}
+.standfirst b{color:var(--brass);font-weight:700}
+.clause{margin:3mm 0 0;font-size:9.2pt;line-height:1.55;color:var(--ink-soft);max-width:152mm}
+
+section{margin-top:10mm}
+.sec-h{font-family:var(--ledger-type);font-size:7.8pt;font-weight:700;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--seal);border-bottom:.7pt solid var(--rule);
+  padding-bottom:1.6mm;margin:0 0 4.5mm;break-after:avoid}
+h2{font-family:var(--display);font-size:16.5pt;font-weight:800;letter-spacing:-.018em;
+  line-height:1.14;margin:0 0 3.2mm;break-after:avoid}
+h3{font-family:var(--display);font-size:11.4pt;font-weight:700;letter-spacing:-.008em;
+  margin:0 0 2mm;break-after:avoid}
+p{margin:0 0 3mm}
+.lede{font-size:10.6pt;color:var(--ink-soft);max-width:154mm}
+
+/* ── scope ────────────────────────────────────────────── */
+.scope{display:grid;grid-template-columns:repeat(3,1fr);gap:4mm}
+.box{border:.8pt solid var(--rule);border-top:2.4pt solid var(--seal);
+  padding:4mm;break-inside:avoid}
+.box p{font-size:9pt;line-height:1.5;color:var(--ink-soft);margin:0}
+.box .replaces{display:block;margin-top:3mm;padding-top:2.4mm;
+  border-top:.5pt dotted var(--rule);font-family:var(--ledger-type);font-size:7pt;
+  letter-spacing:.06em;text-transform:uppercase;color:var(--brass)}
+
+/* ── pillars ──────────────────────────────────────────── */
+.pillar{margin-top:8mm;break-inside:avoid}
+.pillar-h{display:flex;align-items:baseline;gap:3.5mm;border-bottom:1.4pt solid var(--seal);
+  padding-bottom:2mm;margin-bottom:4mm;break-after:avoid}
+.pillar-n{font-family:var(--ledger-type);font-size:8.4pt;font-weight:700;color:var(--brass);
+  letter-spacing:.08em}
+.pillar-h h3{font-size:14pt;margin:0;flex:1}
+.pillar-h .scale{font-family:var(--ledger-type);font-size:6.9pt;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-faint);white-space:nowrap}
+.m{border-left:2pt solid var(--seal-tint);padding-left:5mm;margin-bottom:4.6mm;
+  break-inside:avoid}
+.m h4{font-family:var(--display);font-size:10.4pt;font-weight:700;margin:0 0 1.6mm;
+  letter-spacing:-.005em}
+.m p{font-size:9.5pt;line-height:1.5;color:var(--ink-soft);margin:0}
+.tell{display:block;margin-top:1.8mm;padding:2.2mm 3mm;background:var(--brass-tint);
+  border-left:2pt solid var(--brass);font-size:8.9pt;line-height:1.48;color:var(--ink)}
+.tell b{color:var(--brass)}
+.safety{display:block;margin-top:1.8mm;font-size:8.7pt;line-height:1.5;
+  color:var(--ink-soft);padding-left:4.4mm;position:relative}
+.safety::before{content:"✓";position:absolute;left:0;top:0;color:var(--seal);font-weight:700}
+
+/* ── loss — the ONLY vermilion ────────────────────────── */
+.loss{background:var(--vermilion-tint);border-left:3pt solid var(--vermilion);
+  padding:6mm;break-inside:avoid}
+.loss .sec-h{color:var(--vermilion);border-bottom-color:var(--vermilion)}
+.loss h2{color:var(--vermilion)}
+.loss ol{margin:0;padding:0;list-style:none;counter-reset:l}
+.loss li{counter-increment:l;position:relative;padding-left:9mm;margin-bottom:3.4mm;
+  font-size:9.9pt;line-height:1.5;break-inside:avoid}
+.loss li:last-child{margin-bottom:0}
+.loss li::before{content:counter(l,decimal-leading-zero);position:absolute;left:0;top:.4mm;
+  font-family:var(--ledger-type);font-size:8.2pt;font-weight:700;color:var(--vermilion)}
+.loss em{font-style:italic}
+
+/* ── authority ────────────────────────────────────────── */
+table{width:100%;border-collapse:collapse;font-size:9.1pt}
+thead th{text-align:left;font-family:var(--ledger-type);font-size:7.2pt;font-weight:700;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--seal);
+  border-bottom:1.2pt solid var(--seal);padding:0 4mm 1.8mm 0}
+tbody td{padding:2.4mm 4mm 2.4mm 0;border-bottom:.5pt solid var(--rule);
+  vertical-align:top;line-height:1.44}
+tbody tr{break-inside:avoid}
+td.act{width:42%;font-weight:600}
+code{font-family:var(--ledger-type);font-size:8.2pt;background:var(--seal-tint);
+  color:var(--ink);padding:.4mm 1.2mm;border-radius:1.5pt}
+
+/* ── roadmap ──────────────────────────────────────────── */
+.road{border:.8pt solid var(--rule);padding:4.5mm 5mm}
+.road .row{display:grid;grid-template-columns:42mm 1fr;gap:5mm;padding:2.8mm 0;
+  border-bottom:.5pt solid var(--rule);break-inside:avoid}
+.road .row:last-child{border-bottom:0;padding-bottom:0}
+.road .what{font-weight:700;font-size:9.5pt;line-height:1.36}
+.road .state{font-size:9.1pt;line-height:1.48;color:var(--ink-soft)}
+.road .state b{color:var(--ink);font-weight:600}
+
+/* ── action ───────────────────────────────────────────── */
+.action{border-top:2pt solid var(--seal);padding-top:5mm;break-inside:avoid}
+.action .big{font-family:var(--display);font-weight:800;font-size:21pt;line-height:1.08;
+  letter-spacing:-.02em;color:var(--seal);margin:0 0 4mm;max-width:135mm}
+.steps{margin:0;padding:0;list-style:none;font-size:9.9pt;line-height:1.54;max-width:152mm}
+.steps li{padding-left:8mm;position:relative;margin-bottom:2mm}
+.steps li span{position:absolute;left:0;font-family:var(--ledger-type);font-size:7.8pt;
+  font-weight:700;color:var(--brass)}
+.foot{margin-top:7mm;padding-top:3mm;border-top:.5pt solid var(--rule);
+  font-family:var(--ledger-type);font-size:7pt;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--ink-faint);line-height:1.7}
+
+@page{size:A4;margin:0}
+@media print{
+  :root,:root[data-theme="dark"]{
+    --ledger:#FFFFFF;--surface:#FFFFFF;--ink:#16241F;--ink-soft:#4C5C54;
+    --ink-faint:#7A8880;--seal:#0B5B4A;--seal-tint:#E6EFEA;--brass:#8A5A12;
+    --brass-tint:#F6EEDD;--rule:#D9CEB8;--vermilion:#A81F27;--vermilion-tint:#FBEDEC;
+  }
+  body{background:#fff;padding:0;font-size:9.8pt}
+  .page{width:auto;box-shadow:none;margin:0;padding:13mm 16mm}
+  section,.box,.m,.pillar,.pillar-h,.loss,.loss li,.road,.road .row,.action,.hook,
+  .standfirst,h2,h3,h4,p,tr,li,table,.scope,.tell,.safety{
+    break-inside:avoid;page-break-inside:avoid}
+  .sec-h,h2,h3,h4,.pillar-h{break-after:avoid;page-break-after:avoid}
+  .pb{break-before:page;page-break-before:always}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+@media (max-width:760px){
+  .page{padding:8mm}
+  .hook{font-size:23pt}
+  .scope{grid-template-columns:1fr}
+  .road .row{grid-template-columns:1fr;gap:1.5mm}
+  .pillar-h{flex-wrap:wrap}
+  .tbl-wrap{overflow-x:auto}
+  td.act{width:auto}
+}
+</style>
+</head>
+<body>
+<article class="page">
+
+  <header class="mast">
+    <div class="wordmark">Staff&nbsp;Management</div>
+    <div class="kicker">Punch · Leave · Task · WhatsApp · Pay · Appraisal<br>Android app, browser, and the chat they already use</div>
+  </header>
+
+  <h1 class="hook">Stop reconciling registers.<br><em>Start running people.</em></h1>
+
+  <p class="standfirst"><b>Lock the month.</b> Every payslip is already written — payable days,
+  loss of pay, provident fund, state insurance and professional tax, on a printed A4 slip
+  per employee, filed and retrievable.</p>
+
+  <p class="clause">Because the punch, the leave, the task and the message all landed in the same
+  place as they happened. Nothing is retyped at month end, because nothing was ever kept anywhere
+  else. The run refuses to compute until the period is locked, so no figure is calculated against
+  a month that is still moving — unlock, correct the day, lock again, and the numbers rebuild from
+  the punches rather than from a spreadsheet somebody edited.</p>
+
+  <!-- ══════════ SCOPE ══════════ -->
+  <section>
+    <div class="sec-h">Scope</div>
+    <h2>Six things you run today. One system, and one chat window.</h2>
+    <p class="lede">The question is not whether this adds a tenth login. It is how many of the
+    things on your desk it takes away — and for most of your staff, whether they need to log in
+    at all.</p>
+    <div class="scope">
+      <div class="box">
+        <h3>The day</h3>
+        <p><b>Punch &amp; Leave.</b> A punch carrying a photograph and coordinates. Shifts with
+        grace minutes and dated assignment. Night shifts that cross midnight and stay one shift.
+        Leave applied for, routed to a real approver, decided, and recorded with the approver's
+        name on it.</p>
+        <span class="replaces">Replaces the muster register</span>
+      </div>
+      <div class="box">
+        <h3>The work</h3>
+        <p><b>Task &amp; WhatsApp.</b> Tasks with an owner, a due date and a reminder ladder.
+        Recurring duties on six frequencies. And the whole of it reachable from WhatsApp —
+        assign, complete, list, apply for leave, approve leave, ask who is in today.</p>
+        <span class="replaces">Replaces the group chat</span>
+      </div>
+      <div class="box">
+        <h3>The month &amp; the year</h3>
+        <p><b>Pay &amp; Appraisal.</b> Dated salary structures, payable days from the punches,
+        statutory to Indian ceilings and state slabs, a payslip PDF per person per month. Then
+        thirty-one measured facts per employee rolled into one score you can print.</p>
+        <span class="replaces">Replaces the salary sheet</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ MECHANISM ══════════ -->
+  <section>
+    <div class="sec-h">Mechanism</div>
+    <h2>How each of the six works — and the part only a practitioner notices.</h2>
+    <p class="lede">Everything below is in the running product. Each entry carries one detail you
+    would only think to ask about if you had already done this job by hand.</p>
+
+    <!-- ─── 1 PUNCH ─── -->
+    <div class="pillar">
+      <div class="pillar-h">
+        <span class="pillar-n">01</span><h3>Punch</h3>
+        <span class="scale">Attendance · shifts · geofence</span>
+      </div>
+
+      <div class="m">
+        <h4>The punch carries its own proof</h4>
+        <p>The front camera takes a photograph, the device records its coordinates, and both are
+        written onto the attendance record with a readable street address and the device that
+        sent them.</p>
+        <span class="tell"><b>The detail:</b> it stores the distance from your premises
+        <b>in metres</b> — not merely inside or outside. A punch forty metres past the boundary
+        and one four kilometres away stay distinguishable six months later, when the argument
+        actually happens.</span>
+        <span class="safety">You set the posture per organisation: strict mode refuses the punch and
+        writes nothing; warning mode allows it and flags the distance for a supervisor. The boundary
+        adjusts from a hundred metres to two kilometres.</span>
+      </div>
+
+      <div class="m">
+        <h4>A night shift stays one shift</h4>
+        <p>An attendance beginning at ten at night and ending at six in the morning is filed
+        against the day it began, not split across two dates.</p>
+        <span class="tell"><b>The detail:</b> punch-out <b>looks back two days</b> to find the open
+        punch instead of assuming today, and refuses to close a night shift under six hours or over
+        eighteen — the two shapes a forgotten punch actually takes.</span>
+      </div>
+
+      <div class="m">
+        <h4>Shift changes are dated, not swapped</h4>
+        <p>Move someone to a new shift from a chosen date. Assignments carry an effective-from and
+        an effective-to, so last month's punctuality is judged against last month's shift.</p>
+        <span class="tell"><b>The detail:</b> the previous assignment closes <b>automatically the
+        day before</b> the new one starts. Nobody is ever on two shifts on one date — the condition
+        that silently corrupts every late report.</span>
+      </div>
+
+      <div class="m">
+        <h4>Somebody forgot to punch out</h4>
+        <p>They always do. A supervisor closes every session left open beyond a chosen number of
+        hours, in one action.</p>
+        <span class="tell"><b>The detail:</b> each closure is written as a <b>regularisation</b>
+        carrying who did it, why and when — the correction is a record in its own right, not an
+        edit that erases what was there. Regularised days are then excluded from the late and
+        early-out counts that feed the appraisal.</span>
+      </div>
+    </div>
+
+    <!-- ─── 2 LEAVE ─── -->
+    <div class="pillar">
+      <div class="pillar-h">
+        <span class="pillar-n">02</span><h3>Leave</h3>
+        <span class="scale">Request · route · decide · record</span>
+      </div>
+
+      <div class="m">
+        <h4>Applied for in one message, routed to a real person</h4>
+        <p>Full day, half day or early departure, with dates and a reason. The request is routed
+        to an administrator of that organisation and the employee is told <em>who</em> will review
+        it and that a decision is due within twenty-four hours.</p>
+        <span class="safety">An empty reason is refused and malformed dates are refused. If the
+        organisation has no administrator to route to, the request is rejected rather than filed
+        into nothing.</span>
+      </div>
+
+      <div class="m">
+        <h4>Back-dated leave is flagged the moment it is filed</h4>
+        <p>A request whose start date has already passed is marked post-facto automatically —
+        titled as such, marked in the body of the record, and triaged at a different priority
+        from a planned request. An emergency is raised to critical.</p>
+        <span class="tell"><b>The detail:</b> that same post-facto flag is what the appraisal
+        scores months later. <b>Leave planning is measured by how much leave was filed after it
+        was taken</b> — not by how much leave was taken. Which is the actual problem, and the one
+        no attendance report has ever shown you.</span>
+      </div>
+
+      <div class="m">
+        <h4>The decision is signed</h4>
+        <p>Approve or reject, with a note. The record keeps a decision block — decided by, decided
+        at, and the note — and the employee is notified with the approver named.</p>
+        <span class="tell"><b>The detail:</b> an administrator can only act on requests
+        <b>routed to them</b>, which is why approving your own leave is not a rule that can be
+        bent — the request was never in your queue to begin with.</span>
+      </div>
+    </div>
+
+    <!-- ─── 3 TASK ─── -->
+    <div class="pillar">
+      <div class="pillar-h">
+        <span class="pillar-n">03</span><h3>Task</h3>
+        <span class="scale">Assign · remind · recur · prove</span>
+      </div>
+
+      <div class="m">
+        <h4>The reminder ladder</h4>
+        <p>Give a task a due date and reminders are scheduled the instant it is saved — one day
+        before, then six hours, two hours, one hour, thirty minutes.</p>
+        <span class="tell"><b>The detail:</b> hand the task to someone else and the previous
+        owner's pending reminders are <b>deleted</b> while the new owner's are written. Nobody is
+        chased about work that stopped being theirs.</span>
+      </div>
+
+      <div class="m">
+        <h4>Recurring duties, six frequencies</h4>
+        <p>Daily, weekly, monthly, quarterly, half-yearly or yearly, with an owner, an end date
+        or a fixed number of occurrences, and a completion window in hours or days.</p>
+        <span class="tell"><b>The detail:</b> creating the schedule also creates <b>the first task
+        immediately</b>, so the person sees the work the same day rather than discovering the
+        rota tomorrow.</span>
+      </div>
+
+      <div class="m">
+        <h4>Every task carries its own history</h4>
+        <p>A message thread, an activity log and quality-control entries sit on each task, so the
+        conversation about a job lives on the job rather than in someone's chat.</p>
+        <span class="safety">Deleting a task requires administrator rights, enforced by the
+        database itself rather than by hiding the button — so it holds outside the app too.</span>
+      </div>
+    </div>
+
+    <!-- ─── 4 WHATSAPP ─── -->
+    <div class="pillar">
+      <div class="pillar-h">
+        <span class="pillar-n">04</span><h3>WhatsApp</h3>
+        <span class="scale">Ten operations · no app to open</span>
+      </div>
+
+      <div class="m">
+        <h4>Your staff already have it open</h4>
+        <p>Ten operations run from chat: create a task, update one, complete one, delete one, list
+        what is on your plate, look up a colleague, ask who is in today, apply for leave, approve
+        or reject leave, and set up a recurring duty. The technician who will never install
+        anything still gets counted.</p>
+        <span class="safety">Every one of the ten verifies the sender is an active member of that
+        organisation before it does anything, and every task lookup is scoped to that organisation.
+        A message cannot reach another company's data.</span>
+      </div>
+
+      <div class="m">
+        <h4>Names the way people actually type them</h4>
+        <p>Ask for a colleague and partial names resolve — and the word order does not matter, so
+        "panchal priyanka" and "priyanka panchal" both find the same person.</p>
+        <span class="tell"><b>The detail:</b> deactivated colleagues are filtered out of listings
+        entirely, so a leaver stops being suggested as an assignee the day they are deactivated —
+        rather than the day someone remembers to say so.</span>
+      </div>
+
+      <div class="m">
+        <h4>Chat does not mean unguarded</h4>
+        <p>Completing or updating a task from WhatsApp is refused unless the task is yours —
+        assigned to you or created by you.</p>
+        <span class="tell"><b>The detail:</b> "mark the report done" will not re-close an
+        <b>already-completed</b> task by matching an old title, and approving leave from chat is
+        refused to anyone who is not an administrator of that organisation. The rules are the same
+        rules; only the window changed.</span>
+      </div>
+
+      <div class="m">
+        <h4>"Who's in today?"</h4>
+        <p>One message returns the roll-call for a date: present, absent, late and early-out, with
+        a headcount and an attendance percentage.</p>
+        <span class="tell"><b>The detail:</b> absentees are found by <b>diffing the full roster
+        against the punches</b> — because an absent employee has no attendance row to read. A report
+        built by listing the attendance table can never show you who is missing.</span>
+      </div>
+    </div>
+
+    <!-- ─── 5 PAY ─── -->
+    <div class="pillar">
+      <div class="pillar-h">
+        <span class="pillar-n">05</span><h3>Pay</h3>
+        <span class="scale">Largest module · statutory · payslip PDF</span>
+      </div>
+
+      <div class="m">
+        <h4>Salary structures that are dated</h4>
+        <p>Each structure carries an effective-from and an effective-to with an annual CTC and its
+        component lines, so a raise in the middle of the month resolves to the right structure
+        rather than the latest one.</p>
+        <span class="tell"><b>The detail:</b> each component carries its own
+        <b>participates-in-PF-wage</b> and <b>participates-in-ESIC-wage</b> flag, so an allowance
+        you decided is liable stays liable — instead of the liability being guessed from the
+        component's name.</span>
+      </div>
+
+      <div class="m">
+        <h4>Attendance drives pay directly</h4>
+        <p>Working days, present days, paid leave, half days at half weight, loss of pay and
+        payable days are resolved for the month, then carried onto the payroll run and stored
+        alongside it.</p>
+        <span class="tell"><b>The detail:</b> the pro-rata factor is payable days ÷ working days,
+        applied to <b>earnings only, never to deductions</b>. Prorating a deduction is how provident
+        fund quietly comes up short and nobody notices until the annual return.</span>
+      </div>
+
+      <div class="m">
+        <h4>Statutory to the actual rules</h4>
+        <p>Provident fund at twelve per cent from each side on Basic plus dearness allowance,
+        capped at a fifteen-thousand wage. State insurance at 0.75 and 3.25 per cent while gross
+        stays within twenty-one thousand. Professional tax on real slabs — Gujarat, Maharashtra,
+        Karnataka, Tamil Nadu, Andhra Pradesh and Telangana, West Bengal, Rajasthan, Delhi at nil.</p>
+        <span class="tell"><b>The detail:</b> if the salary structure already contains a provident
+        fund, insurance or professional tax line, the computed one is <b>set to zero</b>. The double
+        deduction does not happen.</span>
+      </div>
+
+      <div class="m">
+        <h4>The payslip answers the question before it is asked</h4>
+        <p>A real A4 PDF with your organisation's name and address, earnings and deductions
+        separated, net pay, and the employer's own contributions shown below.</p>
+        <span class="tell"><b>The detail:</b> six attendance figures are printed on the slip
+        itself — <b>working days, present, paid leave, loss of pay, payable days, late count</b>.
+        That strip is what ends the "why is my salary short" conversation, because the answer is
+        already in his hand.</span>
+        <span class="safety">Each slip is filed to storage under the organisation and the month and
+        the link is kept on the run, so reprinting last March costs one click, not one
+        recalculation.</span>
+      </div>
+
+      <div class="m">
+        <h4>The biometric export, reviewed by a person</h4>
+        <p>Upload the CSV or Excel the machine produces. Columns are matched to fields, rows are
+        staged, and each is accepted or rejected by a human with a note.</p>
+        <span class="tell"><b>The detail:</b> a duplicate row, or one carrying any validation
+        error, is <b>not eligible for apply at all</b> — you cannot bulk-accept your way past it.
+        The batch moves uploaded → mapped → validated → applied as a state the database enforces,
+        not a flag the screen sets.</span>
+        <span class="safety">Three deliberate human acts stand between the file and payroll: accept
+        the rows, confirm the batch, apply it. Nothing from that file reaches a payslip without all
+        three.</span>
+      </div>
+
+      <div class="m">
+        <h4>Describe a salary structure and get a draft</h4>
+        <p>Set out the structure in ordinary words and a draft comes back, split into components
+        with annual amounts and deductions signed correctly.</p>
+        <span class="safety"><b>Who approves it, stated plainly:</b> the assistant writes into the
+        form on screen and never into the database. Every component is re-checked against your own
+        component codes, and anything it cannot match is shown to you as unmapped rather than
+        quietly dropped. The record exists only after a person presses Save.</span>
+      </div>
+    </div>
+
+    <!-- ─── 6 APPRAISAL ─── -->
+    <div class="pillar">
+      <div class="pillar-h">
+        <span class="pillar-n">06</span><h3>Appraisal</h3>
+        <span class="scale">31 measured facts per person</span>
+      </div>
+
+      <div class="m">
+        <h4>The review is already written</h4>
+        <p>For any period you choose — week, month, quarter or year — each employee resolves to
+        thirty-one measured facts: tasks assigned and completed, average hours to completion,
+        overdue count, days present against working days, late arrivals, early departures, average
+        daily hours, leave requested and approved, and back-dated requests.</p>
+        <span class="tell"><b>The detail:</b> it spans <b>four sources at once</b> — the task
+        board, the attendance table, the leave record and the conversation log. An appraisal built
+        from task completion alone rewards the person who closes easy tickets and never turns up.</span>
+      </div>
+
+      <div class="m">
+        <h4>One score, and you can see its parts</h4>
+        <p>Task completion at thirty per cent, attendance and punctuality at twenty-five each,
+        leave planning and communication at ten each. Punctuality starts at a hundred and each
+        late arrival or early departure costs half a day's worth against the days present.</p>
+        <span class="tell"><b>The detail:</b> the weighting <b>normalises over the data that
+        exists</b>. Someone with no conversations recorded is not silently marked down for a
+        category they were never measured in — a flaw that makes most composite scores unusable
+        in their first quarter.</span>
+      </div>
+
+      <div class="m">
+        <h4>Print it and hand it over</h4>
+        <p>A PDF report — employee, department, tasks completed, attendance rate, punctuality,
+        overall score and key strengths — with a summary page carrying the averages across the
+        set, and the top three performers named.</p>
+        <span class="safety">The same period exports as a twenty-two column spreadsheet, so the
+        figure on the printed review can be traced back to the days that produced it rather than
+        being taken on trust.</span>
+      </div>
+
+      <div class="m">
+        <h4>Strengths and gaps, stated as sentences</h4>
+        <p>Each person's report labels what is working and what is not against fixed thresholds —
+        attendance above ninety, punctuality above eighty, communication above seventy — and says
+        so plainly rather than leaving a manager to read a number.</p>
+        <span class="tell"><b>The detail:</b> where there is not enough data to judge, it says
+        <b>"insufficient data"</b> instead of printing a confident zero. The one thing that
+        destroys a review meeting is a number nobody can defend.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ LOSS ══════════ -->
+  <section class="loss">
+    <div class="sec-h">The cost of the present arrangement</div>
+    <h2>What you are losing today</h2>
+    <ol>
+      <li>The second of the month. Two registers, one Excel sheet, and a supervisor who will
+      "send the night-shift numbers by evening." Payroll waits for him. It waited for him last
+      month too.</li>
+
+      <li>The man who punched in at 9:50 at night and out at 6:10 in the morning reads as two
+      half days. You correct it by hand. Every month. For every one of them.</li>
+
+      <li>Salary day, and a message arrives: <em>sir, ₹1,840 kam aaya.</em> Nobody can say which
+      day was cut or why. You pay the difference to end the conversation, and the register is
+      never corrected.</li>
+
+      <li>The leave that was "informed on WhatsApp" in April. The message is four thousand
+      messages up a group chat. There is no record, so there is no argument to be had, so the
+      day is paid.</li>
+
+      <li>Appraisal week. You open a spreadsheet and try to remember eleven months, and end up
+      writing the same three sentences for nine people — because the only person whose year you
+      can actually recall is the one who was loudest.</li>
+    </ol>
+  </section>
+
+  <!-- ══════════ AUTHORITY ══════════ -->
+  <section class="pb">
+    <div class="sec-h">Authority</div>
+    <h2>Anyone can show you a dashboard.<br>Here is what it refuses to allow.</h2>
+    <p class="lede">These are not warnings, validations or confirmation dialogs. They are refusals
+    written into the database and the server, which means they hold when someone bypasses the
+    screen — including when the instruction arrives from a chat window.</p>
+
+    <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>The attempt</th><th>The refusal</th></tr></thead>
+      <tbody>
+        <tr><td class="act">Running payroll on a month still open</td>
+            <td>Blocked at the point of computation.
+            <code>Payroll period must be locked to finalize runs</code></td></tr>
+
+        <tr><td class="act">Paying someone with no salary structure covering that month</td>
+            <td>The run stops on that employee and names them, rather than paying a zero.</td></tr>
+
+        <tr><td class="act">A second payroll run for the same person in the same period</td>
+            <td>Refused by a uniqueness constraint. One run per person per period, structurally.</td></tr>
+
+        <tr><td class="act">A salary structure of zero, or one whose end date precedes its start</td>
+            <td>Both refused by check constraints on the compensation record.</td></tr>
+
+        <tr><td class="act">Applying an imported attendance row that is a duplicate or carries an error</td>
+            <td>Such rows are never eligible for the apply step. There is no override.</td></tr>
+
+        <tr><td class="act">Completing or editing someone else's task from WhatsApp</td>
+            <td><code>You can only complete tasks assigned to you or created by you</code></td></tr>
+
+        <tr><td class="act">Approving leave without being an administrator</td>
+            <td><code>Only admins can approve/reject leave requests</code> — and an administrator
+            sees only the requests routed to them, so approving your own is not possible to
+            attempt.</td></tr>
+
+        <tr><td class="act">Assigning work to someone in another organisation</td>
+            <td>The assignee is verified independently of the sender.
+            <code>Assignee does not belong to this organization</code></td></tr>
+
+        <tr><td class="act">Acting at all from a deactivated account</td>
+            <td>Refused before anything else is evaluated. <code>User is inactive</code></td></tr>
+
+        <tr><td class="act">Punching in twice, or punching out with nothing open</td>
+            <td>Both refused, with the open session named back to the employee.</td></tr>
+
+        <tr><td class="act">Closing a night shift after two hours, or after twenty-two</td>
+            <td>Refused outside the six-to-eighteen-hour window.</td></tr>
+
+        <tr><td class="act">Punching outside the boundary, in strict mode</td>
+            <td>The record is never written. The employee is told the distance in metres and the
+            limit that applies.</td></tr>
+
+        <tr><td class="act">Creating a task belonging to another organisation</td>
+            <td>The organisation is stamped by the database, overriding whatever was sent. A task
+            whose organisation cannot be resolved is rejected outright.</td></tr>
+
+        <tr><td class="act">Deleting a task, or creating a user, without administrator rights</td>
+            <td>Refused by row-level policy and on the server respectively — never by hiding a
+            button.</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <!-- ══════════ ROADMAP ══════════ -->
+  <section>
+    <div class="sec-h">On the roadmap</div>
+    <h2>What is next, and what to run alongside for now.</h2>
+    <p class="lede">Stated here because you would find it in the pilot anyway, and it is cheaper
+    for both of us if you find it on this page first. Everything in the six pillars above is
+    running today; the following is not yet.</p>
+
+    <div class="road">
+      <div class="row"><div class="what">Income tax deduction</div>
+        <div class="state">Provident fund, state insurance and professional tax compute in full.
+        <b>TDS is not yet computed</b> — it awaits annual projection logic. Run it alongside for now.</div></div>
+
+      <div class="row"><div class="what">Statutory filing files</div>
+        <div class="state">Per-employee PF, ESIC and PT figures compute and are stored on every
+        run, so the numbers are ready. <b>The ECR and challan file generators, and the
+        period-level statutory totals screen, are still to come.</b></div></div>
+
+      <div class="row"><div class="what">Leave balances</div>
+        <div class="state">Requesting, routing, deciding, recording and notifying all work, and
+        post-facto leave is flagged and scored. <b>Entitlement, accrual and carry-forward
+        balances are next</b>; today, leave reaches payroll through the monthly override rather
+        than deducting itself.</div></div>
+
+      <div class="row"><div class="what">Overtime pay</div>
+        <div class="state">Overtime hours are captured and printed on the slip.
+        <b>No rate is applied yet</b> — overtime does not currently change net pay.</div></div>
+
+      <div class="row"><div class="what">Employee payslip self-service</div>
+        <div class="state">Administrators generate, download and reprint slips, and every slip is
+        filed. <b>The employee-facing screen and automatic distribution are still to come</b> —
+        slips are shared by the administrator today.</div></div>
+
+      <div class="row"><div class="what">Unattended recurring generation</div>
+        <div class="state">Recurring schedules are created with their first task, and the
+        generator for later occurrences is written. <b>Running it unattended on a timer is the
+        remaining step.</b></div></div>
+
+      <div class="row"><div class="what">Payroll change history</div>
+        <div class="state">Recalculating a person <b>replaces the previous run rather than
+        versioning it</b>. If a defensible run-by-run change trail matters to your auditors,
+        weigh this one.</div></div>
+
+      <div class="row"><div class="what">Working offline</div>
+        <div class="state">The app <b>requires connectivity</b> to punch and to save. If any of
+        your sites have poor coverage, test this before anything else — though staff at those
+        sites can transact over WhatsApp instead.</div></div>
+    </div>
+  </section>
+
+  <!-- ══════════ ACTION ══════════ -->
+  <section class="action">
+    <div class="sec-h">The evaluation</div>
+    <p class="big">Ninety minutes, with your last closed month.</p>
+    <ul class="steps">
+      <li><span>01</span>Bring one real biometric export and one real salary structure — the messy
+      ones, not the tidy ones.</li>
+      <li><span>02</span>Load the export. Accept the rows and reject the bad ones. Lock the period.</li>
+      <li><span>03</span>Open a payslip and read the six attendance figures printed on it: working
+      days, present, paid leave, loss of pay, payable days, late count.</li>
+      <li><span>04</span>Set it beside the sheet you actually paid that month, and find where the
+      two disagree. That difference is the whole argument, and it is either there or it is not.</li>
+      <li><span>05</span>Then send a WhatsApp message: assign a task to someone by half their
+      name, ask who is in today, and apply for a day's leave. Watch it arrive in an
+      administrator's queue with your name on it.</li>
+      <li><span>06</span>Finally, try to break it — run payroll on an unlocked month, complete a
+      colleague's task from chat, approve your own leave, punch in twice. Confirm each refusal
+      holds.</li>
+    </ul>
+  </section>
+
+  <p class="foot">
+    Staff Management — punch, leave, task, WhatsApp, pay and appraisal for multi-site operations
+    in India.<br>
+    Android application, browser, and WhatsApp · deployed per organisation · roles: superadmin,
+    admin, user · row-level isolation per organisation.<br>
+    Every capability in the six pillars is present in the running build. The roadmap section lists
+    what is not.
+  </p>
+
+</article>
+</body>
+</html>
