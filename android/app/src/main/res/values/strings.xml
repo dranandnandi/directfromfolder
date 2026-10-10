@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Staff Management</string>
-    <string name="title_activity_main">Staff Management</string>
+    <string name="app_name">MediTrust Clinics</string>
+    <string name="title_activity_main">MediTrust Clinics</string>
     <string name="package_name">com.example.taskmanagement</string>
     <string name="custom_url_scheme">com.example.taskmanagement</string>
 </resources>

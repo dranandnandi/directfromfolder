@@ -3,7 +3,9 @@ import { Link, useLocation } from 'react-router-dom';
 import { HiX, HiOfficeBuilding, HiChartBar, HiCog, HiQuestionMarkCircle, HiUserGroup, HiTrash, HiRefresh, HiUsers, HiCalendar, HiClock, HiCurrencyDollar, HiDocument, HiLightningBolt, HiQrcode } from 'react-icons/hi';
 import { supabase } from '../utils/supabaseClient';
 import { OrganizationSettings } from '../models/task';
-import dcpLogo from '/notification-icon.svg';
+import { getBranding } from '../constants/branding';
+
+const branding = getBranding();
 
 interface SidebarProps {
   isOpen: boolean;
@@ -84,10 +86,10 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2">
-              <img src={dcpLogo} alt="DCP Logo" className="w-10 h-10" />
+              <img src={branding.icon} alt={`${branding.name} logo`} className="w-10 h-10 object-contain" />
               <div className="flex flex-col">
-                <span className="font-medium text-sm">{organizationSettings.name}</span>
-                <span className="text-xs text-gray-500">Task Manager</span>
+                <span className="font-medium text-sm">{branding.overrideOrganizationName ? branding.name : organizationSettings.name}</span>
+                <span className="text-xs text-gray-500">{branding.tagline}</span>
               </div>
             </div>
             <button onClick={onClose} className="lg:hidden text-gray-500 hover:text-gray-700">

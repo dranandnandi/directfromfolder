@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { supabase } from '../../utils/supabaseClient';
-import dcpLogo from '/notification-icon.svg';
+import { getBranding } from '../../constants/branding';
+
+const branding = getBranding();
 
 interface ResetPasswordFormProps {
   onComplete: () => void;
@@ -48,7 +50,7 @@ const ResetPasswordForm = ({ onComplete }: ResetPasswordFormProps) => {
     <div className="min-h-screen bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8">
         <div className="text-center mb-6">
-          <img src={dcpLogo} alt="DCP Logo" className="w-24 h-24 mx-auto mb-4" />
+          <img src={branding.logo} alt={`${branding.name} logo`} className={branding.key === 'default' ? 'w-24 h-24 mx-auto mb-4' : 'h-40 w-auto mx-auto mb-4 object-contain'} />
           <h2 className="text-2xl font-bold text-gray-900">Set a new password</h2>
           <div className="h-1 w-20 bg-yellow-400 mx-auto my-4"></div>
         </div>

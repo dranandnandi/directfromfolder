@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.dcptaskmanagmentapp.taskmanager',
-  appName: 'Staff Management',
+  appName: 'MediTrust Clinics',
   webDir: 'dist',
   server: {
     androidScheme: 'https'
@@ -19,7 +19,7 @@ const config: CapacitorConfig = {
     },
     LocalNotifications: {
       smallIcon: "ic_stat_icon_config_sample",
-      iconColor: "#488AFF",
+      iconColor: "#1B4A66",
       sound: "beep.wav"
     },
     SplashScreen: {
