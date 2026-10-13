@@ -11,6 +11,18 @@
 # REDIRECTS & ROUTING
 # ============================================================================
 
+# Per-domain PWA manifest.
+# index.html always links /manifest.json; on the MediTrust domain serve the
+# MediTrust manifest at that path so Chrome sees the right name/icons from the
+# very first request (the runtime <link rel="manifest"> swap in branding.ts is
+# only a fallback). `force = true` is required because /manifest.json exists
+# as a real file.
+[[redirects]]
+  from = "https://staff.anprohealthtech.com/manifest.json"
+  to = "/manifest-meditrust.json"
+  status = 200
+  force = true
+
 # SPA Routing - Explicit routes for all pages
 # These ensure proper SPA handling for React Router
 
@@ -154,6 +166,17 @@
   [headers.values]
     Cache-Control = "public, max-age=3600"
     Content-Type = "application/manifest+json"
+
+[[headers]]
+  for = "/manifest-meditrust.json"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+    Content-Type = "application/manifest+json"
+
+[[headers]]
+  for = "/icons/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
 
 [[headers]]
   for = "/sw.js"

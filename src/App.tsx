@@ -35,6 +35,14 @@ const PayrollPreview = lazy(() => import('./payroll/PayrollPreview'));
 const MyPayslip = lazy(() => import('./me/MyPayslip'));
 
 import { Task, TaskType, User, OrganizationSettings, TaskStatus, TaskPriority } from './models/task';
+import {
+  DEFAULT_ADVISORY_TYPES,
+  DEFAULT_FOLLOW_UP_TYPES,
+  DEFAULT_ROUND_TYPES,
+  withDefaultAdvisoryTypes,
+  withDefaultFollowUpTypes,
+  withDefaultRoundTypes,
+} from './constants/taskOptions';
 import { OrganizationProvider } from './contexts/OrganizationContext';
 
 // Define interfaces for raw Supabase response data
@@ -142,9 +150,9 @@ function App() {
     id: '1',
     organizationId: '1',
     name: 'Staff Management Solution',
-    advisoryTypes: ['General', 'Policy', 'Safety', 'Urgent'],
-    roundTypes: ['Morning Round', 'Evening Round', 'Night Round'],
-    followUpTypes: ['Progress Update', 'Issue Resolution', 'Report Review', 'General Check-in'],
+    advisoryTypes: [...DEFAULT_ADVISORY_TYPES],
+    roundTypes: [...DEFAULT_ROUND_TYPES],
+    followUpTypes: [...DEFAULT_FOLLOW_UP_TYPES],
     createdAt: new Date(),
     updatedAt: new Date(),
   });
@@ -342,9 +350,9 @@ function App() {
         id: data.id,
         organizationId: data.id,
         name: data.name || 'Staff Management Solution',
-        advisoryTypes: data.advisory_types || [],
-        roundTypes: data.round_types || [],
-        followUpTypes: data.follow_up_types || [],
+        advisoryTypes: withDefaultAdvisoryTypes(data.advisory_types),
+        roundTypes: withDefaultRoundTypes(data.round_types),
+        followUpTypes: withDefaultFollowUpTypes(data.follow_up_types),
         createdAt: new Date(data.created_at),
         updatedAt: new Date(data.updated_at),
       });

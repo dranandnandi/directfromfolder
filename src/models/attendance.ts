@@ -87,16 +87,53 @@ export interface Attendance {
   regularization_reason?: string;
   regularized_at?: string;
 
+  // Multiple punch cycles per day (see attendance_sessions)
+  session_count?: number;
+  session_hours?: number;
+
   created_at: string;
   updated_at: string;
 
   // Populated when joined
   shift?: Shift;
+  sessions?: AttendanceSession[];
   user?: {
     id: string;
     name: string;
     department: string;
   };
+}
+
+/**
+ * One punch in/out cycle. A day's attendance row aggregates its sessions:
+ * first punch in, last punch out, hours = sum of closed sessions.
+ */
+export interface AttendanceSession {
+  id: string;
+  attendance_id: string;
+  user_id: string;
+  organization_id?: string;
+  date: string; // YYYY-MM-DD
+
+  punch_in_time: string;
+  punch_in_latitude?: number;
+  punch_in_longitude?: number;
+  punch_in_address?: string;
+  punch_in_selfie_url?: string;
+  punch_in_device_info?: any;
+  punch_in_distance_meters?: number;
+
+  punch_out_time?: string | null;
+  punch_out_latitude?: number;
+  punch_out_longitude?: number;
+  punch_out_address?: string;
+  punch_out_selfie_url?: string;
+  punch_out_device_info?: any;
+  punch_out_distance_meters?: number;
+
+  is_outside_geofence: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AttendanceRegularization {

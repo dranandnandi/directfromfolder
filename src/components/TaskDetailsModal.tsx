@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { HiX, HiPencil, HiPhone, HiPlus, HiChevronDown, HiChevronRight } from 'react-icons/hi';
 import { FaWhatsapp } from 'react-icons/fa';
 import { Task, User, QualityControlEntry, TaskType, TaskStatus } from '../models/task';
+import { TASK_OPTION_LABELS } from '../constants/taskOptions';
 import { supabase } from '../utils/supabaseClient';
 import clsx from 'clsx';
 import { generateWhatsAppMessage } from '../utils/aiUtils';
@@ -620,6 +621,24 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                         <div>
                           <span className="text-sm text-gray-500">Complete within: </span>
                           <span className="text-sm">{task.hoursToComplete} hours</span>
+                        </div>
+                      )}
+                      {task.roundType && (
+                        <div>
+                          <span className="text-sm text-gray-500">{TASK_OPTION_LABELS.roundTypes}: </span>
+                          <span className="text-sm">{task.roundType}</span>
+                        </div>
+                      )}
+                      {task.followUpType && (
+                        <div>
+                          <span className="text-sm text-gray-500">{TASK_OPTION_LABELS.followUpTypes}: </span>
+                          <span className="text-sm">{task.followUpType}</span>
+                        </div>
+                      )}
+                      {task.advisoryType && (
+                        <div>
+                          <span className="text-sm text-gray-500">{TASK_OPTION_LABELS.advisoryTypes}: </span>
+                          <span className="text-sm">{task.advisoryType}</span>
                         </div>
                       )}
                       {task.contactNumber && (

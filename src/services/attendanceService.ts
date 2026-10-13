@@ -1,5 +1,5 @@
 import { supabase } from '../utils/supabaseClient';
-import { Shift, EmployeeShift, Attendance, AttendanceRegularization, PunchData, AttendanceSummary } from '../models/attendance';
+import { Shift, EmployeeShift, Attendance, AttendanceSession, AttendanceRegularization, PunchData, AttendanceSummary } from '../models/attendance';
 import { calculateDistance, parseGeofenceSettings } from '../utils/geolocation';
 
 export class AttendanceService {
@@ -101,6 +101,55 @@ export class AttendanceService {
     return today;
   }
 
+  /** Attendance row with its shift and punch sessions. */
+  private static async getAttendanceById(attendanceId: string): Promise<Attendance> {
+    const { data, error } = await supabase
+      .from('attendance')
+      .select(`
+        *,
+        shift:shifts(*),
+        sessions:attendance_sessions(*)
+      `)
+      .eq('id', attendanceId)
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
+  /**
+   * Whether the user may punch in again after a completed cycle today.
+   * Resolved in the DB: user override, else organization default (false).
+   */
+  static async isMultiplePunchAllowed(userId: string): Promise<boolean> {
+    const { data, error } = await supabase.rpc('fn_user_allows_multiple_punches', { p_user_id: userId });
+    if (error) {
+      console.warn('Could not resolve multiple punch setting, defaulting to not allowed:', error.message);
+      return false;
+    }
+    return data === true;
+  }
+
+  /** The user's open punch session (punched in, not yet out), if any. */
+  private static async getOpenSession(userId: string, lookbackDays: number = 2): Promise<AttendanceSession | null> {
+    const fromDate = new Date();
+    fromDate.setDate(fromDate.getDate() - lookbackDays);
+    const searchFromDate = fromDate.toISOString().split('T')[0];
+
+    const { data, error } = await supabase
+      .from('attendance_sessions')
+      .select('*')
+      .eq('user_id', userId)
+      .gte('date', searchFromDate)
+      .is('punch_out_time', null)
+      .order('punch_in_time', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data || null;
+  }
+
   private static async getActiveOpenAttendanceRecord(userId: string, lookbackDays: number = 2): Promise<Attendance | null> {
     const fromDate = new Date();
     fromDate.setDate(fromDate.getDate() - lookbackDays);
@@ -110,7 +159,8 @@ export class AttendanceService {
       .from('attendance')
       .select(`
         *,
-        shift:shifts(*)
+        shift:shifts(*),
+        sessions:attendance_sessions(*)
       `)
       .eq('user_id', userId)
       .gte('date', searchFromDate)
@@ -468,12 +518,7 @@ export class AttendanceService {
       isHoliday = true;
     }
 
-    // Create or update attendance record
-    const attendanceData: any = {
-      user_id: userId,
-      organization_id: userData.organization_id,
-      date: attendanceDate,
-      shift_id: currentShift?.shift_id,
+    const punchInFields = {
       punch_in_time: currentTime,
       punch_in_latitude: punchData.latitude,
       punch_in_longitude: punchData.longitude,
@@ -481,24 +526,96 @@ export class AttendanceService {
       punch_in_selfie_url: selfieUrl,
       punch_in_device_info: punchData.device_info,
       punch_in_distance_meters: geofenceResult.distance,
-      is_outside_geofence: geofenceResult.isOutsideGeofence,
-      is_late: isLate,
-      is_weekend: isWeekend,
-      is_holiday: isHoliday,
-      is_absent: false,
     };
 
-    const { data, error } = await supabase
+    // One attendance row per user per date; sessions hang off it.
+    const { data: existingDay, error: dayError } = await supabase
       .from('attendance')
-      .upsert(attendanceData, { onConflict: 'user_id,date' })
-      .select(`
-        *,
-        shift:shifts(*)
-      `)
-      .single();
+      .select('*')
+      .eq('user_id', userId)
+      .eq('date', attendanceDate)
+      .maybeSingle();
+    if (dayError) throw dayError;
 
-    if (error) throw error;
-    return data;
+    // A completed cycle already exists today: only users with the multiple
+    // punch setting may start another one.
+    if (existingDay?.punch_in_time && existingDay?.punch_out_time) {
+      const allowed = await this.isMultiplePunchAllowed(userId);
+      if (!allowed) {
+        throw new Error('You have already punched in and out today. Multiple punches are not enabled for your account.');
+      }
+    }
+
+    let attendanceId: string;
+
+    if (!existingDay) {
+      // First punch of the day creates the day row (same shape as before).
+      const { data: created, error: createError } = await supabase
+        .from('attendance')
+        .upsert({
+          user_id: userId,
+          organization_id: userData.organization_id,
+          date: attendanceDate,
+          shift_id: currentShift?.shift_id,
+          ...punchInFields,
+          is_outside_geofence: geofenceResult.isOutsideGeofence,
+          is_late: isLate,
+          is_weekend: isWeekend,
+          is_holiday: isHoliday,
+          is_absent: false,
+        }, { onConflict: 'user_id,date' })
+        .select('id')
+        .single();
+
+      if (createError) throw createError;
+      attendanceId = created.id;
+    } else {
+      attendanceId = existingDay.id;
+
+      // Day recorded before sessions existed: keep its punch as session #1
+      // so the second cycle does not overwrite it.
+      if ((existingDay.session_count ?? 0) === 0 && existingDay.punch_in_time) {
+        const { error: legacyError } = await supabase
+          .from('attendance_sessions')
+          .insert({
+            attendance_id: attendanceId,
+            user_id: userId,
+            organization_id: existingDay.organization_id,
+            date: existingDay.date,
+            punch_in_time: existingDay.punch_in_time,
+            punch_in_latitude: existingDay.punch_in_latitude,
+            punch_in_longitude: existingDay.punch_in_longitude,
+            punch_in_address: existingDay.punch_in_address,
+            punch_in_selfie_url: existingDay.punch_in_selfie_url,
+            punch_in_device_info: existingDay.punch_in_device_info,
+            punch_in_distance_meters: existingDay.punch_in_distance_meters,
+            punch_out_time: existingDay.punch_out_time,
+            punch_out_latitude: existingDay.punch_out_latitude,
+            punch_out_longitude: existingDay.punch_out_longitude,
+            punch_out_address: existingDay.punch_out_address,
+            punch_out_selfie_url: existingDay.punch_out_selfie_url,
+            punch_out_device_info: existingDay.punch_out_device_info,
+            punch_out_distance_meters: existingDay.punch_out_distance_meters,
+            is_outside_geofence: existingDay.is_outside_geofence ?? false,
+          });
+        if (legacyError) throw legacyError;
+      }
+    }
+
+    // New session. The DB trigger syncs the day row (first in, last out, hours).
+    const { error: sessionError } = await supabase
+      .from('attendance_sessions')
+      .insert({
+        attendance_id: attendanceId,
+        user_id: userId,
+        organization_id: userData.organization_id,
+        date: attendanceDate,
+        ...punchInFields,
+        is_outside_geofence: geofenceResult.isOutsideGeofence,
+      });
+    if (sessionError) throw sessionError;
+
+    return this.getAttendanceById(attendanceId);
   }
 
   static async punchOut(userId: string, punchData: PunchData): Promise<Attendance> {
@@ -523,7 +640,42 @@ export class AttendanceService {
       );
     }
 
-    // Find active punch-in record across day boundary for overnight shifts.
+    // Session-based path: close the open session; the DB trigger updates the day row.
+    const openSession = await this.getOpenSession(userId, 2);
+    if (openSession) {
+      const day = await this.getAttendanceById(openSession.attendance_id);
+
+      if (day.shift?.is_overnight) {
+        const hoursDiff = (new Date(currentTime).getTime() - new Date(openSession.punch_in_time).getTime()) / (1000 * 60 * 60);
+        if (hoursDiff < 6) {
+          throw new Error('Too early to punch out. Minimum 6 hours required for overnight shifts.');
+        }
+        if (hoursDiff > 18) {
+          throw new Error('Exceeds maximum shift duration of 18 hours.');
+        }
+      }
+
+      const sessionSelfieUrl = await this.uploadSelfie(punchData.selfie_file, userId, 'punch_out', userData.organization_id);
+
+      const { error: sessionError } = await supabase
+        .from('attendance_sessions')
+        .update({
+          punch_out_time: currentTime,
+          punch_out_latitude: punchData.latitude,
+          punch_out_longitude: punchData.longitude,
+          punch_out_address: punchData.address,
+          punch_out_selfie_url: sessionSelfieUrl,
+          punch_out_device_info: punchData.device_info,
+          punch_out_distance_meters: geofenceResult.distance,
+          is_outside_geofence: openSession.is_outside_geofence || geofenceResult.isOutsideGeofence,
+        })
+        .eq('id', openSession.id);
+      if (sessionError) throw sessionError;
+
+      return this.getAttendanceById(openSession.attendance_id);
+    }
+
+    // Legacy path: day rows recorded before sessions existed.
     const activeRecord = await this.getActiveOpenAttendanceRecord(userId, 2);
     if (!activeRecord) {
       throw new Error('No active punch-in found. Please punch in first.');
@@ -632,7 +784,8 @@ export class AttendanceService {
       .from('attendance')
       .select(`
         *,
-        shift:shifts(*)
+        shift:shifts(*),
+        sessions:attendance_sessions(*)
       `)
       .eq('user_id', userId)
       .eq('date', today)

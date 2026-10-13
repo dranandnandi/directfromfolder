@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { withDefaultAdvisoryTypes, withDefaultFollowUpTypes, withDefaultRoundTypes } from '../constants/taskOptions';
 import { User, TaskType, OrganizationSettings } from '../models/task';
 import { supabase } from './supabaseClient';
 
@@ -20,6 +21,10 @@ export const generateTaskFromText = async (
     const organizationName = enhancedContext?.organizationName || organizationSettings.name;
     const availableTeamMembers = enhancedContext?.availableTeamMembers || 
       teamMembers.map(member => ({ name: member.name, role: member.role, department: member.department }));
+
+    const roundTypeOptions = withDefaultRoundTypes(organizationSettings?.roundTypes);
+    const followUpTypeOptions = withDefaultFollowUpTypes(organizationSettings?.followUpTypes);
+    const advisoryTypeOptions = withDefaultAdvisoryTypes(organizationSettings?.advisoryTypes);
 
     const prompt = `
 You are a task parser for "${organizationName}". Convert the following text into a structured task.
@@ -44,12 +49,12 @@ The JSON must follow this exact structure:
   "type": "${selectedType}", // This must be exactly this value
   "priority": "critical" | "moderate" | "lessImportant",
   "patientId": "Reference ID (client/case/record number) if mentioned, otherwise null",
-  "location": "For rounds, site/room/location if mentioned, otherwise null",
-  "roundType": "For rounds: ${organizationSettings.roundTypes.join('/')}, otherwise null",
-  "advisoryType": "For quick advisory: ${organizationSettings.advisoryTypes.join('/')}, otherwise null",
-  "followUpType": "For follow-ups: ${organizationSettings.followUpTypes.join('/')}, otherwise null",
+  "location": "Site/room/branch/location if mentioned, otherwise null",
+  "roundType": "Visit type for client tracking tasks, one of: ${roundTypeOptions.join(' / ')}, otherwise null",
+  "advisoryType": "Task category for regular tasks, one of: ${advisoryTypeOptions.join(' / ')}, otherwise null",
+  "followUpType": "Follow-up type for client tracking or audit tasks, one of: ${followUpTypeOptions.join(' / ')}, otherwise null",
   "assigneeName": "Name or role mentioned for assignment (from available team members), otherwise null",
-  "hoursToComplete": "For rounds, extract number of hours mentioned (e.g., '4' for '4 hours'), otherwise null",
+  "hoursToComplete": "Number of hours mentioned to complete the task (e.g., '4' for '4 hours'), otherwise null",
   "contactNumber": "Extract any phone number mentioned (e.g., +91-1234567890, 123-456-7890), otherwise null",
   "whatsappNumber": "Extract WhatsApp number if mentioned separately, otherwise null",
   "taskDate": "Extract due date if mentioned, format as YYYY-MM-DD, otherwise null",
@@ -57,7 +62,7 @@ The JSON must follow this exact structure:
 }
 
 Common shorthand understanding:
-- "round" = a scheduled round / inspection visit
+- "round" or "visit" = a scheduled visit / inspection (client tracking task)
 - "f/u" or "follow up" = follow up task
 - "ref" or "ref id" = reference ID
 - "site", "floor" or "branch" = location
@@ -187,7 +192,9 @@ Priority: ${priority}
 Due Date: ${dueDate}
 ${task.patientId ? `Reference ID: ${task.patientId}` : ''}
 ${task.location ? `Location: ${task.location}` : ''}
-${task.roundType ? `Round Type: ${task.roundType}` : ''}
+${task.roundType ? `Visit Type: ${task.roundType}` : ''}
+${task.followUpType ? `Follow-up Type: ${task.followUpType}` : ''}
+${task.advisoryType ? `Task Category: ${task.advisoryType}` : ''}
 ${task.type === TaskType.ClientTracking && task.hoursToComplete ? `Due: Complete within ${task.hoursToComplete} hours` : ''}
 
 Required Format:

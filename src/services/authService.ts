@@ -58,6 +58,8 @@ export interface UserProfile {
   onboarding_state?: string;
   last_active_at?: string;
   is_active: boolean;
+  /** true/false = user override, null/undefined = organization default */
+  allow_multiple_punches?: boolean | null;
 }
 
 /**
@@ -312,8 +314,24 @@ function convertDatabaseProfile(dbRecord: any): UserProfile {
     updated_at: dbRecord.updated_at,
     onboarding_state: dbRecord.onboarding_state,
     last_active_at: dbRecord.last_active_at,
-    is_active: dbRecord.is_active !== false
+    is_active: dbRecord.is_active !== false,
+    allow_multiple_punches: dbRecord.allow_multiple_punches ?? null
   };
+}
+
+/**
+ * Per-user multiple punch setting. null = organization default.
+ * Direct update; RLS allows admins to update users in their organization.
+ */
+export async function setMultiplePunchSetting(userId: string, value: boolean | null): Promise<void> {
+  const { error } = await supabase
+    .from('users')
+    .update({ allow_multiple_punches: value, updated_at: new Date().toISOString() })
+    .eq('id', userId);
+
+  if (error) {
+    throw new Error(`Failed to update multiple punch setting: ${error.message}`);
+  }
 }
 
 export const authService = {
@@ -322,5 +340,6 @@ export const authService = {
   deleteUser,
   restoreUser,
   getOrganizationUsers,
-  resetUserPassword
+  resetUserPassword,
+  setMultiplePunchSetting
 };

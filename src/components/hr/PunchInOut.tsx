@@ -164,7 +164,8 @@ const PunchInOut: React.FC = () => {
   const [showCamera, setShowCamera] = useState(false);
   const [punchType, setPunchType] = useState<'in' | 'out'>('in');
   const [userId, setUserId] = useState<string>('');
-  
+  const [multiPunchAllowed, setMultiPunchAllowed] = useState(false);
+
   // Geofence state
   const [orgLocation, setOrgLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [distanceFromOrg, setDistanceFromOrg] = useState<number | null>(null);
@@ -208,12 +209,14 @@ const PunchInOut: React.FC = () => {
       }
 
       // Fetch current active attendance session (overnight-safe), else today's record.
-      const [attendance, currentShift] = await Promise.all([
+      const [attendance, currentShift, allowMultiple] = await Promise.all([
         AttendanceService.getTodayOrActiveAttendance(userData.id),
-        AttendanceService.getEmployeeCurrentShift(userData.id)
+        AttendanceService.getEmployeeCurrentShift(userData.id),
+        AttendanceService.isMultiplePunchAllowed(userData.id)
       ]);
       setTodayAttendance(attendance || null);
       setAssignedShift(currentShift?.shift || null);
+      setMultiPunchAllowed(allowMultiple);
 
       // Get current location
       await getCurrentLocation();
@@ -383,6 +386,39 @@ const PunchInOut: React.FC = () => {
 
   const status = getAttendanceStatus();
 
+  const sessions = [...(todayAttendance?.sessions || [])].sort((a, b) =>
+    a.punch_in_time.localeCompare(b.punch_in_time)
+  );
+
+  const renderSessions = () => {
+    if (sessions.length === 0) return null;
+    return (
+      <div className="pt-2 border-t">
+        <div className="text-sm text-gray-600 mb-1">Sessions today ({sessions.length})</div>
+        <div className="space-y-1">
+          {sessions.map((session, index) => {
+            const hours = session.punch_out_time
+              ? (new Date(session.punch_out_time).getTime() - new Date(session.punch_in_time).getTime()) / (1000 * 60 * 60)
+              : null;
+            return (
+              <div key={session.id} className="flex items-center justify-between text-sm">
+                <span className="text-gray-500">#{index + 1}</span>
+                <span>
+                  {formatTime(session.punch_in_time)} - {session.punch_out_time ? formatTime(session.punch_out_time) : 'open'}
+                </span>
+                <span className="font-medium">{hours != null ? `${hours.toFixed(2)}h` : '...'}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const punchBlockedByGeofence = Boolean(
+    geofenceSettings?.enabled && geofenceSettings?.enforcement_mode === 'strict' && isOutsideGeofence
+  );
+
   return (
     <div className="max-w-md mx-auto space-y-6">
       {/* Current Time Display */}
@@ -516,6 +552,7 @@ const PunchInOut: React.FC = () => {
                 Outside geofence
               </div>
             )}
+            {sessions.length > 1 && renderSessions()}
             <button
               onClick={handlePunchOut}
               disabled={!location || loading || (geofenceSettings?.enabled && geofenceSettings?.enforcement_mode === 'strict' && isOutsideGeofence)}
@@ -613,6 +650,27 @@ const PunchInOut: React.FC = () => {
                 })()}
               </div>
             </div>
+            {renderSessions()}
+            {multiPunchAllowed && (
+              <div className="pt-3 border-t">
+                <button
+                  onClick={handlePunchIn}
+                  disabled={!location || loading || punchBlockedByGeofence}
+                  className="w-full py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  <HiCheck className="w-5 h-5" />
+                  {loading ? 'Punching In...' : 'Punch In Again'}
+                </button>
+                <p className="text-xs text-gray-500 text-center mt-2">
+                  Starts another session for today. Hours from all sessions add up.
+                </p>
+                {punchBlockedByGeofence && (
+                  <p className="text-xs text-red-600 text-center mt-1">
+                    Punch blocked due to geofence policy. Move closer to office or contact admin.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

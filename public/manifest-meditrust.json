@@ -1,16 +1,17 @@
 {
+  "id": "/",
   "name": "MediTrust Clinics - Staff Portal",
   "short_name": "MediTrust",
+  "description": "MediTrust Clinics staff portal: tasks, attendance, leave and payroll.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#ffffff",
   "theme_color": "#1b4a66",
   "icons": [
-    {
-      "src": "/meditrust-icon.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
-    }
+    { "src": "/icons/meditrust-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/meditrust-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/meditrust-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

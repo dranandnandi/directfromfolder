@@ -4,6 +4,13 @@ import { Task, TaskType, TaskPriority, TaskStatus, User, OrganizationSettings, R
 import VoiceCommandButton from './VoiceCommandButton';
 import { generateTaskFromText } from '../utils/aiUtils';
 import { combineDateAndTime, extractDateFromISOString, extractTimeFromISOString } from '../utils/timeUtils';
+import {
+  TASK_OPTION_LABELS,
+  optionsWithCurrent,
+  withDefaultAdvisoryTypes,
+  withDefaultFollowUpTypes,
+  withDefaultRoundTypes,
+} from '../constants/taskOptions';
 
 interface TaskModalProps {
   isOpen: boolean;
@@ -26,6 +33,13 @@ const TaskModal: React.FC<TaskModalProps> = ({
 }) => {
   // State for form sections visibility
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
+
+  // Organization-configured classification lists (Settings > Organization),
+  // with industry-neutral fallbacks when an organization has none yet.
+  const roundTypeOptions = withDefaultRoundTypes(organizationSettings?.roundTypes);
+  const followUpTypeOptions = withDefaultFollowUpTypes(organizationSettings?.followUpTypes);
+  const advisoryTypeOptions = withDefaultAdvisoryTypes(organizationSettings?.advisoryTypes);
+  const selectClass = 'w-full px-3 py-3 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 text-base';
   
   // Main task state
   const [mainTask, setMainTask] = useState({
@@ -208,9 +222,11 @@ const TaskModal: React.FC<TaskModalProps> = ({
         // Task-specific fields - only include for relevant task types
         patientId: (mainTask.type === TaskType.ClientTracking) ? mainTask.patientId : undefined,
         location: mainTask.location || undefined,
-        roundType: mainTask.type === TaskType.AuditTask ? mainTask.roundType : undefined,
-        followUpType: mainTask.type === TaskType.ClientTracking ? mainTask.followUpType : undefined,
-        advisoryType: mainTask.type === TaskType.RegularTask ? mainTask.advisoryType : undefined,
+        roundType: mainTask.type === TaskType.ClientTracking ? (mainTask.roundType || undefined) : undefined,
+        followUpType: (mainTask.type === TaskType.ClientTracking || mainTask.type === TaskType.AuditTask)
+          ? (mainTask.followUpType || undefined)
+          : undefined,
+        advisoryType: mainTask.type === TaskType.RegularTask ? (mainTask.advisoryType || undefined) : undefined,
         manualWhatsappNumber: mainTask.manualWhatsappNumber || undefined,
         contactNumber: mainTask.contactNumber || undefined,
       };
@@ -263,22 +279,42 @@ const TaskModal: React.FC<TaskModalProps> = ({
               </div>
             </div>
             
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Round Type
-              </label>
-              <select
-                value={mainTask.roundType}
-                onChange={(e) => setMainTask({ ...mainTask, roundType: e.target.value })}
-                className="w-full px-3 py-3 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 text-base"
-              >
-                <option value="">Select round type</option>
-                <option value="morning">Morning Round</option>
-                <option value="evening">Evening Round</option>
-                <option value="emergency">Emergency Round</option>
-                <option value="consultation">Consultation</option>
-              </select>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {TASK_OPTION_LABELS.roundTypes}
+                </label>
+                <select
+                  value={mainTask.roundType}
+                  onChange={(e) => setMainTask({ ...mainTask, roundType: e.target.value })}
+                  className={selectClass}
+                >
+                  <option value="">Select {TASK_OPTION_LABELS.roundTypes.toLowerCase()}</option>
+                  {optionsWithCurrent(roundTypeOptions, mainTask.roundType).map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {TASK_OPTION_LABELS.followUpTypes}
+                </label>
+                <select
+                  value={mainTask.followUpType}
+                  onChange={(e) => setMainTask({ ...mainTask, followUpType: e.target.value })}
+                  className={selectClass}
+                >
+                  <option value="">Select {TASK_OPTION_LABELS.followUpTypes.toLowerCase()}</option>
+                  {optionsWithCurrent(followUpTypeOptions, mainTask.followUpType).map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
             </div>
+            <p className="text-xs text-gray-500">
+              Options are configured per organization in Settings &gt; Organization.
+            </p>
           </>
         );
 
@@ -302,18 +338,17 @@ const TaskModal: React.FC<TaskModalProps> = ({
               
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Follow-up Type
+                  {TASK_OPTION_LABELS.followUpTypes}
                 </label>
                 <select
                   value={mainTask.followUpType}
                   onChange={(e) => setMainTask({ ...mainTask, followUpType: e.target.value })}
-                  className="w-full px-3 py-3 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 text-base"
+                  className={selectClass}
                 >
-                  <option value="">Select follow-up type</option>
-                  <option value="post-surgery">Post Surgery</option>
-                  <option value="medication-review">Medication Review</option>
-                  <option value="progress-check">Progress Check</option>
-                  <option value="test-results">Test Results</option>
+                  <option value="">Select {TASK_OPTION_LABELS.followUpTypes.toLowerCase()}</option>
+                  {optionsWithCurrent(followUpTypeOptions, mainTask.followUpType).map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -325,21 +360,17 @@ const TaskModal: React.FC<TaskModalProps> = ({
           <>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Task Category
+                {TASK_OPTION_LABELS.advisoryTypes}
               </label>
               <select
                 value={mainTask.advisoryType}
                 onChange={(e) => setMainTask({ ...mainTask, advisoryType: e.target.value })}
-                className="w-full px-3 py-3 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 text-base"
+                className={selectClass}
               >
-                <option value="">Select task category</option>
-                <option value="medication">Medication Related</option>
-                <option value="lifestyle">Lifestyle Related</option>
-                <option value="diet">Diet Related</option>
-                <option value="exercise">Exercise Related</option>
-                <option value="general">General Task</option>
-                <option value="administrative">Administrative</option>
-                <option value="communication">Communication</option>
+                <option value="">Select {TASK_OPTION_LABELS.advisoryTypes.toLowerCase()}</option>
+                {optionsWithCurrent(advisoryTypeOptions, mainTask.advisoryType).map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
               </select>
             </div>
             

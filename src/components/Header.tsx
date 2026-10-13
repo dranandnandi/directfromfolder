@@ -1,5 +1,5 @@
-import { HiMenu, HiRefresh, HiDownload } from 'react-icons/hi';
-import { useState, useEffect } from 'react';
+import { HiMenu, HiRefresh, HiDownload, HiX } from 'react-icons/hi';
+import { useState, useEffect, useRef } from 'react';
 import NotificationBell from './NotificationBell';
 import dcpLogo from '/notification-icon.svg';
 import { OrganizationSettings } from '../models/task';
@@ -13,8 +13,32 @@ interface HeaderProps {
 }
 
 const Header: React.FC<HeaderProps> = ({ onMenuClick, onRefresh, organizationSettings }) => {
-  const { isInstallable, promptInstall } = useInstallPrompt();
+  const { isInstallable, isInstalled, isIOS, promptInstall } = useInstallPrompt();
   const [userInitials, setUserInitials] = useState('U');
+  const [showInstallHelp, setShowInstallHelp] = useState(false);
+  const installHelpRef = useRef<HTMLDivElement>(null);
+
+  // Close the install-help popover when clicking outside of it
+  useEffect(() => {
+    if (!showInstallHelp) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (installHelpRef.current && !installHelpRef.current.contains(e.target as Node)) {
+        setShowInstallHelp(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [showInstallHelp]);
+
+  const handleInstallClick = async () => {
+    if (isInstallable) {
+      const outcome = await promptInstall();
+      if (outcome !== 'unavailable') return;
+    }
+    // Browser did not offer a native prompt (Safari, Firefox, or the criteria
+    // were not met yet) - show manual instructions instead of doing nothing.
+    setShowInstallHelp((v) => !v);
+  };
 
   // Fetch current user data for avatar
   useEffect(() => {
@@ -54,9 +78,6 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, onRefresh, organizationSet
     fetchCurrentUser();
   }, []);
 
-  // Debug logging
-  console.log('PWA Install status:', { isInstallable });
-
   return (
     <header className="bg-white shadow-sm">
       {/* Safe area spacer for Android status bar/notch - more space on mobile */}
@@ -74,18 +95,54 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, onRefresh, organizationSet
         </div>
         
         <div className="flex items-center gap-4">
-          {/* Always show install button for testing */}
-          <button
-            onClick={promptInstall}
-            className="p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1"
-            title={isInstallable ? "Install app" : "Install not available"}
-            disabled={!isInstallable}
-          >
-            <HiDownload className="w-4 h-4" />
-            <span className="hidden sm:inline text-sm">
-              {isInstallable ? 'Install' : 'PWA'}
-            </span>
-          </button>
+          {/* Install (PWA) button - hidden once the app is running installed */}
+          {!isInstalled && (
+            <div className="relative" ref={installHelpRef}>
+              <button
+                onClick={handleInstallClick}
+                className="p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1"
+                title="Install this app on your device"
+                aria-haspopup="dialog"
+                aria-expanded={showInstallHelp}
+              >
+                <HiDownload className="w-4 h-4" />
+                <span className="hidden sm:inline text-sm">Install app</span>
+              </button>
+              {showInstallHelp && (
+                <div
+                  role="dialog"
+                  className="absolute right-0 mt-2 w-72 bg-white border border-gray-200 rounded-lg shadow-lg p-4 text-sm text-gray-700 z-50"
+                >
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <p className="font-semibold text-gray-900">Install this app</p>
+                    <button
+                      onClick={() => setShowInstallHelp(false)}
+                      className="text-gray-400 hover:text-gray-600"
+                      aria-label="Close"
+                    >
+                      <HiX className="w-4 h-4" />
+                    </button>
+                  </div>
+                  {isIOS ? (
+                    <ol className="list-decimal pl-4 space-y-1">
+                      <li>Open this page in <strong>Safari</strong>.</li>
+                      <li>Tap the <strong>Share</strong> button (square with an arrow).</li>
+                      <li>Choose <strong>Add to Home Screen</strong>, then tap <strong>Add</strong>.</li>
+                    </ol>
+                  ) : (
+                    <ol className="list-decimal pl-4 space-y-1">
+                      <li>Use <strong>Chrome</strong> or <strong>Edge</strong>.</li>
+                      <li>Open the browser menu (<strong>&#8942;</strong>) or click the install icon in the address bar.</li>
+                      <li>Choose <strong>Install app</strong> / <strong>Add to Home screen</strong>.</li>
+                    </ol>
+                  )}
+                  <p className="mt-2 text-xs text-gray-500">
+                    If the option is missing, the app may already be installed or the browser does not support installing web apps.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
           <button
             onClick={onRefresh}
             className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"

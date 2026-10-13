@@ -41,7 +41,8 @@ const UserManagement: React.FC<UserManagementProps> = () => {
     countryCode: '+91',
     phone: '',
     role: 'user' as 'user' | 'admin' | 'superadmin',
-    department: ''
+    department: '',
+    allowMultiplePunches: 'default' as 'default' | 'yes' | 'no'
   });
 
   // Country codes
@@ -60,8 +61,12 @@ const UserManagement: React.FC<UserManagementProps> = () => {
     countryCode: '+91',
     phone: '',
     role: 'user' as 'user' | 'admin' | 'superadmin',
-    department: departments[0] || ''
+    department: departments[0] || '',
+    allowMultiplePunches: 'default' as 'default' | 'yes' | 'no'
   });
+
+  const multiPunchToBoolean = (value: 'default' | 'yes' | 'no'): boolean | null =>
+    value === 'yes' ? true : value === 'no' ? false : null;
 
   useEffect(() => {
     initializeUserManagement();
@@ -169,7 +174,11 @@ const UserManagement: React.FC<UserManagementProps> = () => {
         countryCode: detectedCountryCode,
         phone: user.phone || '',
         role: user.role as any,
-        department: user.department
+        department: user.department,
+        allowMultiplePunches:
+          user.allow_multiple_punches === true ? 'yes'
+          : user.allow_multiple_punches === false ? 'no'
+          : 'default'
       });
     } else {
       // Create mode
@@ -276,6 +285,11 @@ const UserManagement: React.FC<UserManagementProps> = () => {
 
         await authService.updateProfile(selectedUser.id, updates);
 
+        const multiPunch = multiPunchToBoolean(formData.allowMultiplePunches);
+        if (multiPunch !== (selectedUser.allow_multiple_punches ?? null)) {
+          await authService.setMultiplePunchSetting(selectedUser.id, multiPunch);
+        }
+
         if (formData.password) {
           await authService.resetUserPassword(selectedUser.id, formData.password);
         }
@@ -298,8 +312,13 @@ const UserManagement: React.FC<UserManagementProps> = () => {
           organizationId: organizationId
         };
 
-        await authService.createUser(userData);
-        
+        const createdUser = await authService.createUser(userData);
+
+        const multiPunch = multiPunchToBoolean(formData.allowMultiplePunches);
+        if (multiPunch !== null && createdUser?.id) {
+          await authService.setMultiplePunchSetting(createdUser.id, multiPunch);
+        }
+
         // Refresh users list
         await fetchUsers(organizationId);
         handleCloseModal();
@@ -523,6 +542,9 @@ const UserManagement: React.FC<UserManagementProps> = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">{user.department}</div>
+                      {user.allow_multiple_punches === true && (
+                        <div className="text-xs text-blue-600">Multi-punch</div>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getRoleBadgeColor(user.role)}`}>
@@ -801,6 +823,26 @@ const UserManagement: React.FC<UserManagementProps> = () => {
                   {formData.role === 'admin' && 'Admins can manage users and settings'}
                   {formData.role === 'superadmin' && 'Super Admins have full system access'}
                   {formData.role === 'user' && 'Regular users with standard permissions'}
+                </p>
+              </div>
+
+              {/* Multiple punches per day */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Multiple punches per day
+                </label>
+                <select
+                  value={formData.allowMultiplePunches}
+                  onChange={(e) => setFormData({ ...formData, allowMultiplePunches: e.target.value as 'default' | 'yes' | 'no' })}
+                  disabled={formLoading}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                >
+                  <option value="default">Organization default (not allowed)</option>
+                  <option value="yes">Allowed</option>
+                  <option value="no">Not allowed</option>
+                </select>
+                <p className="mt-1 text-xs text-gray-500">
+                  Lets this user punch in and out more than once a day, for example doctors with split timings. Hours from all sessions add up into one day.
                 </p>
               </div>
             </div>

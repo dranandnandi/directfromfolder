@@ -120,7 +120,7 @@ export function applyBrandingToDocument(): Branding {
   };
 
   setLink('icon', b.icon, b.icon.endsWith('.svg') ? 'image/svg+xml' : 'image/png');
-  setLink('apple-touch-icon', b.icon);
+  setLink('apple-touch-icon', `/icons/${b.key}-192.png`);
   setLink('manifest', b.manifest);
   setMeta('theme-color', b.themeColor);
   setMeta('application-name', b.name);

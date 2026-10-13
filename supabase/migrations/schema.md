@@ -304,9 +304,9 @@ CREATE TABLE public.organization_memberships (
 CREATE TABLE public.organizations (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   name text NOT NULL,
-  advisory_types ARRAY DEFAULT ARRAY['Medication'::text, 'Diet'::text, 'Lifestyle'::text, 'Emergency'::text],
-  round_types ARRAY DEFAULT ARRAY['Morning Round'::text, 'Evening Round'::text, 'Emergency Round'::text],
-  follow_up_types ARRAY DEFAULT ARRAY['Post Surgery'::text, 'Treatment Progress'::text, 'Test Results'::text, 'General Check-up'::text],
+  advisory_types ARRAY DEFAULT ARRAY['General'::text, 'Administrative'::text, 'Communication'::text, 'Policy'::text, 'Safety'::text, 'Urgent'::text],
+  round_types ARRAY DEFAULT ARRAY['Scheduled Visit'::text, 'Follow-up Visit'::text, 'Urgent Visit'::text, 'Site Inspection'::text, 'Consultation'::text],
+  follow_up_types ARRAY DEFAULT ARRAY['Progress Update'::text, 'Issue Resolution'::text, 'Report Review'::text, 'General Check-in'::text],
   departments ARRAY DEFAULT ARRAY['Management'::text, 'Medical'::text, 'Nursing'::text],
   max_users integer DEFAULT 10,
   current_users integer DEFAULT 0,
