@@ -1,9 +1,12 @@
 import React from 'react';
+import { HiAcademicCap, HiCheckCircle } from 'react-icons/hi';
 import { Link, useLocation } from 'react-router-dom';
 import { HiX, HiOfficeBuilding, HiChartBar, HiCog, HiQuestionMarkCircle, HiUserGroup, HiTrash, HiRefresh, HiUsers, HiCalendar, HiClock, HiCurrencyDollar, HiDocument, HiLightningBolt, HiQrcode } from 'react-icons/hi';
 import { supabase } from '../utils/supabaseClient';
 import { OrganizationSettings } from '../models/task';
 import { getBranding } from '../constants/branding';
+import { canManagePayroll, canViewPayslip } from '../utils/permissions';
+import { useStaffAccess } from '../contexts/StaffAccessContext';
 
 const branding = getBranding();
 
@@ -52,6 +55,7 @@ const MenuItem = ({ icon: Icon, children, to, onClick, active = false, onNavigat
 
 const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole, organizationSettings }) => {
   const location = useLocation();
+  const { can } = useStaffAccess();
 
   const getActiveView = () => {
     const path = location.pathname;
@@ -99,6 +103,11 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
 
           {/* Main Navigation */}
           <nav className="space-y-1 mb-6">
+            <MenuItem icon={HiCheckCircle} to="/tasks" active={activeView === 'tasks'} onNavigate={onClose}>My tasks</MenuItem>
+            <MenuItem icon={HiAcademicCap} to="/training" active={activeView.startsWith('training')} onNavigate={onClose}>Training</MenuItem>
+            {(can('leave.approve') || can('attendance.approve')) && <MenuItem icon={HiCheckCircle} to="/approvals" active={activeView === 'approvals'} onNavigate={onClose}>Approvals inbox</MenuItem>}
+            {can('attendance.approve') && <MenuItem icon={HiClock} to="/attendance/team" active={activeView === 'attendance/team'} onNavigate={onClose}>Team attendance</MenuItem>}
+            {['admin', 'superadmin'].includes(userRole) && <MenuItem icon={HiUserGroup} to="/team/access-groups" active={activeView === 'team/access-groups'} onNavigate={onClose}>Access groups</MenuItem>}
             <MenuItem 
               icon={HiOfficeBuilding} 
               to="/"
@@ -211,7 +220,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
             >
               Payroll Preview
             </MenuItem>
-            {(userRole === 'admin' || userRole === 'superadmin') && (
+            {canManagePayroll(userRole) && (
               <MenuItem 
                 icon={HiCurrencyDollar}
                 to="/payroll"
@@ -221,7 +230,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
                 Payroll System
               </MenuItem>
             )}
-            {(userRole !== 'admin' && userRole !== 'superadmin') && (
+            {canViewPayslip(userRole) && (
               <MenuItem 
                 icon={HiDocument}
                 to="/my-payslip"
@@ -273,7 +282,6 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, onNavigate, userRole
             </div>
             <div className="text-xs text-gray-500 px-4 mt-4">
               <div>Version: 3.6.53</div>
-              <div>My IPv4 Address: 122.161.5.77</div>
             </div>
           </div>
         </div>

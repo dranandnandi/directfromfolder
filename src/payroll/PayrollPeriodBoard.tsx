@@ -4,6 +4,9 @@ import { supabase } from "../utils/supabaseClient";
 import { useOrganization } from "../contexts/OrganizationContext";
 import { callEdge } from "../lib/edgeClient";
 import { payslipPdfService } from "../services/payslipPdfService";
+import { usePayrollReadiness } from '../hooks/usePayrollReadiness';
+import { staffWorkflowService, workflowError } from '../services/staffWorkflowService';
+import PayrollReadinessPanel from './widgets/PayrollReadinessPanel';
 
 /* ================================================================
    Types
@@ -118,6 +121,8 @@ export default function PayrollPeriodBoard() {
   const { month, year, orgId: ctxOrgId } = useContext(PayrollContext);
   const { organizationId: globalOrgId } = useOrganization();
   const orgId = ctxOrgId || globalOrgId;
+  const readiness = usePayrollReadiness(orgId, month, year);
+  const [actionError, setActionError] = useState('');
 
   /* ---- State ---- */
   const [period, setPeriod] = useState<PayrollPeriod | null>(null);
@@ -162,13 +167,13 @@ export default function PayrollPeriodBoard() {
         .from("users")
         .select("id, name, email, department")
         .eq("organization_id", orgId)
+        .or('is_active.eq.true,is_active.is.null')
+        .in('role', ['user', 'admin', 'superadmin', 'payroll_admin'])
         .order("name");
 
       /* 3. Compensation with CTC (direct query instead of edge fn for richer data) */
-      const periodEnd = new Date(year, month, 0);
-      const periodStart = new Date(year, month - 1, 1);
-      const endISO = periodEnd.toISOString().slice(0, 10);
-      const startISO = periodStart.toISOString().slice(0, 10);
+      const startISO = `${year}-${String(month).padStart(2, '0')}-01`;
+      const endISO = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`;
 
       const { data: compRows } = await supabase
         .from("employee_compensation")
@@ -255,6 +260,7 @@ export default function PayrollPeriodBoard() {
   /* ---- Run single employee payroll (finalize = calculate + save) ---- */
   const runOne = async (userId: string) => {
     if (!period) return;
+    setActionError('');
     setEmployees((prev) =>
       prev.map((e) => (e.id === userId ? { ...e, processing: true } : e))
     );
@@ -267,6 +273,7 @@ export default function PayrollPeriodBoard() {
       await refresh();
     } catch (err) {
       console.error("[PeriodBoard] runOne error", err);
+      setActionError(workflowError(err)); readiness.refresh();
     }
     setEmployees((prev) =>
       prev.map((e) => (e.id === userId ? { ...e, processing: false } : e))
@@ -293,6 +300,7 @@ export default function PayrollPeriodBoard() {
   /* ---- Bulk run all pending ---- */
   const runAll = async () => {
     if (!period) return;
+    setActionError('');
     const pending = employees.filter((e) => e.hasCompensation && !e.run);
     if (pending.length === 0) return;
     setBulkProcessing(true);
@@ -308,6 +316,9 @@ export default function PayrollPeriodBoard() {
         });
       } catch (err) {
         console.error(`[PeriodBoard] bulk run error for ${e.id}`, err);
+        setActionError(`${e.name || 'Employee'}: ${workflowError(err)}. Processing stopped; resolve this issue and retry.`);
+        readiness.refresh();
+        break;
       }
       setEmployees((prev) =>
         prev.map((r) => (r.id === e.id ? { ...r, processing: false } : r))
@@ -321,19 +332,25 @@ export default function PayrollPeriodBoard() {
   const toggleLock = async () => {
     if (!period) return;
     const nextStatus = period.status === "draft" ? "locked" : "draft";
-    await supabase.from("payroll_periods")
-      .update({ status: nextStatus, lock_at: nextStatus === "locked" ? new Date().toISOString() : null })
-      .eq("id", period.id);
-    await refresh();
+    setActionError('');
+    try {
+      const { error } = await supabase.from("payroll_periods").update({ status: nextStatus, lock_at: nextStatus === "locked" ? new Date().toISOString() : null }).eq("id", period.id);
+      if (error) throw error;
+      await refresh(); readiness.refresh();
+    } catch (error) { setActionError(workflowError(error)); readiness.refresh(); }
   };
 
   /* ---- Post / Finalize period ---- */
   const postPeriod = async () => {
     if (!period) return;
-    await supabase.from("payroll_periods")
-      .update({ status: "posted" })
-      .eq("id", period.id);
-    await refresh();
+    setActionError('');
+    try {
+      const check = await staffWorkflowService.readiness(orgId, month, year, true);
+      if (!check.ready) throw new Error(check.groups.filter(group => group.blocking).map(group => `${group.label} (${group.count})`).join(', '));
+      const { error } = await supabase.from("payroll_periods").update({ status: "posted" }).eq("id", period.id);
+      if (error) throw error;
+      await refresh(); readiness.refresh();
+    } catch (error) { setActionError(workflowError(error)); readiness.refresh(); }
   };
   /* ---- Derived data ---- */
   const filtered = useMemo(() => {
@@ -423,7 +440,7 @@ export default function PayrollPeriodBoard() {
             {period?.status === "draft" && (
               <button
                 onClick={toggleLock}
-                disabled={pendingCount === 0}
+                disabled={pendingCount === 0 || readiness.loading || !readiness.data?.ready}
                 className="px-5 py-2.5 bg-white text-indigo-700 font-semibold rounded-xl hover:bg-indigo-50 transition disabled:opacity-50"
               >
                 Lock &amp; Prepare Payroll
@@ -433,7 +450,7 @@ export default function PayrollPeriodBoard() {
               <>
                 <button
                   onClick={runAll}
-                  disabled={bulkProcessing || pendingCount === 0}
+                  disabled={bulkProcessing || pendingCount === 0 || readiness.loading || !readiness.data?.ready}
                   className="px-5 py-2.5 bg-white/20 backdrop-blur text-white font-semibold rounded-xl hover:bg-white/30 transition disabled:opacity-50"
                 >
                   {bulkProcessing
@@ -446,7 +463,7 @@ export default function PayrollPeriodBoard() {
                   Unlock
                 </button>
                 <button onClick={postPeriod}
-                  disabled={pendingCount > 0}
+                  disabled={pendingCount > 0 || noCompCount > 0 || readiness.loading || !readiness.data?.ready}
                   className="px-5 py-2.5 bg-white text-indigo-700 font-semibold rounded-xl hover:bg-indigo-50 transition disabled:opacity-50"
                 >
                   Finalize &amp; Post
@@ -477,6 +494,8 @@ export default function PayrollPeriodBoard() {
           </div>
         )}
       </div>
+      {actionError && <p role="alert" className="rounded-xl bg-red-50 p-4 text-sm text-red-700">{actionError}</p>}
+      <PayrollReadinessPanel {...readiness} onRefresh={readiness.refresh} />
       {/* ---- Stat Cards ---- */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {[
@@ -629,7 +648,7 @@ export default function PayrollPeriodBoard() {
                       {period?.status === "locked" && emp.hasCompensation && !emp.run && (
                         <button
                           onClick={() => runOne(emp.id)}
-                          disabled={emp.processing}
+                          disabled={emp.processing || bulkProcessing || readiness.loading || !readiness.data?.ready}
                           className="px-3 py-1.5 text-xs font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-50"
                         >
                           {emp.processing ? (

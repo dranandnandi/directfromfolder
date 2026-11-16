@@ -5,6 +5,7 @@ import App from './App'
 import './index.css'
 import { applyBrandingToDocument } from './constants/branding'
 import { Capacitor } from '@capacitor/core'
+import { StaffAccessProvider } from './contexts/StaffAccessContext'
 
 applyBrandingToDocument()
 
@@ -21,7 +22,7 @@ if (import.meta.env.PROD && !Capacitor.isNativePlatform() && 'serviceWorker' in 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
-      <App />
+      <StaffAccessProvider><App /></StaffAccessProvider>
     </BrowserRouter>
   </React.StrictMode>,
 )

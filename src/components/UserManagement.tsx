@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import {
   HiPlus,
   HiPencil,
@@ -418,6 +419,7 @@ const UserManagement: React.FC<UserManagementProps> = () => {
             <p className="text-gray-600">
               Manage users and permissions for your organization
             </p>
+            <Link to="/team/access-groups" className="mt-2 inline-block text-sm font-medium text-blue-700">Manage access groups →</Link>
           </div>
           <button
             onClick={() => handleOpenModal()}

@@ -1,11 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { HiUsers, HiClock, HiExclamationCircle, HiCheck, HiX, HiEye, HiLocationMarker, HiCamera } from 'react-icons/hi';
 import { AttendanceService } from '../../services/attendanceService';
-import { Attendance, AttendanceRegularization } from '../../models/attendance';
+import { Attendance, AttendanceRegularization, AttendanceSession } from '../../models/attendance';
 import { supabase } from '../../utils/supabaseClient';
 import { formatDistance } from '../../utils/geolocation';
 import PunchInOut from './PunchInOut';
+import AttendanceCorrections from './AttendanceCorrections';
+import AdminMarkAttendance from './AdminMarkAttendance';
+import { attendanceToday } from '../../utils/attendanceCorrection';
 import { useNavigate } from 'react-router-dom';
+import { useStaffAccess } from '../../contexts/StaffAccessContext';
 
 interface MonthlyCumulativeRow {
   user_id: string;
@@ -25,14 +29,69 @@ interface AttendanceDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
   attendance: any;
+  isAdmin?: boolean;
+  onChanged?: () => void;
 }
 
 const AttendanceDetailModal: React.FC<AttendanceDetailModalProps> = ({
   isOpen,
   onClose,
-  attendance
+  attendance,
+  isAdmin = false,
+  onChanged
 }) => {
+  const [sessions, setSessions] = useState<AttendanceSession[]>([]);
+  const [busy, setBusy] = useState(false);
+  const attendanceId: string | undefined = attendance?.id;
+
+  const loadSessions = async () => {
+    if (!attendanceId) return;
+    try {
+      setSessions(await AttendanceService.getAttendanceSessions(attendanceId));
+    } catch (error) {
+      console.error('Error loading sessions:', error);
+      setSessions([]);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen && isAdmin && attendanceId) {
+      loadSessions();
+    } else {
+      setSessions([]);
+    }
+  }, [isOpen, isAdmin, attendanceId]);
+
+  const runCorrection = async (
+    action: 'reopen' | 'delete',
+    sessionId?: string
+  ) => {
+    if (!attendanceId) return;
+    const what = action === 'reopen' ? 'Reopen this punch-out' : 'Delete this punch';
+    const reason = window.prompt(`${what}? Enter the reason (kept in the audit log):`);
+    if (!reason || !reason.trim()) return;
+
+    setBusy(true);
+    try {
+      if (action === 'reopen') {
+        await AttendanceService.adminReopenPunchOut(attendanceId, reason.trim(), sessionId);
+      } else {
+        await AttendanceService.adminDeletePunch(attendanceId, reason.trim(), sessionId);
+      }
+      onChanged?.();
+      onClose();
+    } catch (error: any) {
+      console.error('Punch correction failed:', error);
+      alert(error?.message || 'Could not apply the correction.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!isOpen || !attendance) return null;
+
+  const formatClock = (value?: string | null) =>
+    value ? new Date(value).toLocaleTimeString() : 'open';
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -245,6 +304,63 @@ const AttendanceDetailModal: React.FC<AttendanceDetailModalProps> = ({
             </div>
           )}
         </div>
+
+        {isAdmin && attendance.punch_in_time && (
+          <div className="mt-6 pt-4 border-t space-y-3">
+            <h4 className="font-medium text-gray-900">Fix a mistaken punch</h4>
+            {sessions.length > 0 ? (
+              <div className="space-y-2">
+                {sessions.map((session, index) => (
+                  <div key={session.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <span>
+                      #{index + 1} &nbsp;{formatClock(session.punch_in_time)} - {formatClock(session.punch_out_time)}
+                    </span>
+                    <span className="flex gap-3">
+                      {session.punch_out_time && (
+                        <button
+                          disabled={busy}
+                          onClick={() => runCorrection('reopen', session.id)}
+                          className="text-blue-600 hover:text-blue-900 disabled:opacity-50"
+                        >
+                          Reopen punch-out
+                        </button>
+                      )}
+                      <button
+                        disabled={busy}
+                        onClick={() => runCorrection('delete', session.id)}
+                        className="text-red-600 hover:text-red-900 disabled:opacity-50"
+                      >
+                        Delete
+                      </button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex gap-3 text-sm">
+                {attendance.punch_out_time && (
+                  <button
+                    disabled={busy}
+                    onClick={() => runCorrection('reopen')}
+                    className="text-blue-600 hover:text-blue-900 disabled:opacity-50"
+                  >
+                    Reopen punch-out
+                  </button>
+                )}
+                <button
+                  disabled={busy}
+                  onClick={() => runCorrection('delete')}
+                  className="text-red-600 hover:text-red-900 disabled:opacity-50"
+                >
+                  Delete punch
+                </button>
+              </div>
+            )}
+            <p className="text-xs text-gray-500">
+              Reopening leaves the employee checked in so they can punch out again. Every change is logged with your reason.
+            </p>
+          </div>
+        )}
         
         <div className="flex justify-end mt-6">
           <button
@@ -344,20 +460,32 @@ const RegularizationModal: React.FC<RegularizationModalProps> = ({
 };
 
 const AttendanceDashboard: React.FC = () => {
+  const { can } = useStaffAccess();
   const navigate = useNavigate();
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [regularizations, setRegularizations] = useState<AttendanceRegularization[]>([]);
-  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState<string>(attendanceToday());
   const [loading, setLoading] = useState(true);
   const [showRegularizations, setShowRegularizations] = useState(false);
   const [showAttendanceDetail, setShowAttendanceDetail] = useState(false);
   const [selectedAttendance, setSelectedAttendance] = useState<any>(null);
   const [organizationId, setOrganizationId] = useState<string>('');
   const [currentUserRole, setCurrentUserRole] = useState<string>('');
-  const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().slice(0, 7));
+  const [currentUserId, setCurrentUserId] = useState<string>('');
+  const [initializationError, setInitializationError] = useState<string | null>(null);
+  const isAdmin = currentUserRole === 'admin' || currentUserRole === 'superadmin';
+  const [selectedMonth, setSelectedMonth] = useState<string>(attendanceToday().slice(0, 7));
   const [monthlyRows, setMonthlyRows] = useState<MonthlyCumulativeRow[]>([]);
   const [monthlyLoading, setMonthlyLoading] = useState(false);
   const [duplicateRowsCollapsed, setDuplicateRowsCollapsed] = useState(0);
+  const [punchVersion, setPunchVersion] = useState(0);
+  const [operationError, setOperationError] = useState('');
+  const [adminPunch, setAdminPunch] = useState<{
+    employee: { id: string; name: string };
+    date: string;
+    action: 'in' | 'out';
+    punchInTime?: string;
+  } | null>(null);
   const [aiHealth, setAiHealth] = useState<{ lastRunAt: string | null; pendingReview: number }>({
     lastRunAt: null,
     pendingReview: 0
@@ -368,26 +496,26 @@ const AttendanceDashboard: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (organizationId) {
+    if (organizationId && currentUserId && currentUserRole) {
       fetchAttendanceData();
-      fetchAIHealth();
+      if (isAdmin) fetchAIHealth();
     }
-  }, [selectedDate, organizationId]);
+  }, [selectedDate, organizationId, currentUserId, currentUserRole]);
 
   useEffect(() => {
-    if (organizationId) {
+    if (organizationId && currentUserId && currentUserRole) {
       fetchMonthlyCumulative();
     }
-  }, [organizationId, selectedMonth]);
+  }, [organizationId, selectedMonth, currentUserId, currentUserRole]);
 
   const initializeData = async () => {
     try {
       // Get current user's organization and role
       const { data: currentUser } = await supabase.auth.getUser();
       console.log('Current user:', currentUser.user?.id);
-      if (!currentUser.user?.id) return;
+      if (!currentUser.user?.id) throw new Error('Please sign in to view your attendance.');
 
-      const { data: userData } = await supabase
+      const { data: userData, error: profileError } = await supabase
         .from('users')
         .select('organization_id, role, id')
         .eq('auth_id', currentUser.user.id)
@@ -395,22 +523,24 @@ const AttendanceDashboard: React.FC = () => {
 
       console.log('User data:', userData);
       
-      if (!userData?.organization_id) {
-        console.log('No organization ID found for user');
-        return;
+      if (profileError || !userData?.organization_id || !userData?.id || !userData?.role) {
+        throw new Error('Unable to load your attendance access. Please sign in again.');
       }
 
       console.log('Setting organization ID:', userData.organization_id);
       console.log('User role:', userData.role);
       setOrganizationId(userData.organization_id);
       setCurrentUserRole(userData.role);
+      setCurrentUserId(userData.id);
     } catch (error) {
       console.error('Error initializing:', error);
+      setInitializationError(error instanceof Error ? error.message : 'Unable to load attendance access.');
+      setLoading(false);
     }
   };
 
-  const fetchAttendanceData = async () => {
-    if (!organizationId) {
+  const fetchAttendanceData = async (background = false) => {
+    if (!organizationId || !currentUserId || !currentUserRole) {
       console.log('No organization ID available');
       return;
     }
@@ -418,25 +548,28 @@ const AttendanceDashboard: React.FC = () => {
     console.log('Fetching attendance with:', { organizationId, selectedDate });
     
     try {
-      setLoading(true);
+      if (!background) setLoading(true);
       
       // Use our enhanced function to get comprehensive attendance data
       const { data: attendanceData, error: attendanceError } = await supabase
         .rpc('get_attendance_with_details', {
           p_organization_id: organizationId,
-          p_date: selectedDate
+          p_date: selectedDate,
+          p_user_id: isAdmin ? null : currentUserId
         });
 
       if (attendanceError) {
         console.error('Error fetching attendance data:', attendanceError);
         setAttendance([]);
         setRegularizations([]);
-        setLoading(false);
+        if (!background) setLoading(false);
         return;
       }
 
       // Transform the function result to match our component expectations
-      const transformedData = (attendanceData || []).map((record: any) => ({
+      const transformedData = (attendanceData || [])
+        .filter((record: any) => isAdmin || record.user_id === currentUserId)
+        .map((record: any) => ({
         ...record,
         user: {
           id: record.user_id,
@@ -473,49 +606,59 @@ const AttendanceDashboard: React.FC = () => {
       setAttendance(deduped);
 
       // Get regularizations
-      const regularizationData = await AttendanceService.getPendingRegularizations(organizationId);
+      const regularizationData = isAdmin
+        ? await AttendanceService.getPendingRegularizations(organizationId)
+        : [];
       setRegularizations(regularizationData);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
   };
 
   const fetchMonthlyCumulative = async () => {
-    if (!organizationId || !selectedMonth) return;
+    if (!organizationId || !selectedMonth || !currentUserId || !currentUserRole) return;
     setMonthlyLoading(true);
     try {
       const [year, month] = selectedMonth.split('-').map(Number);
       const monthStart = `${selectedMonth}-01`;
-      const monthEnd = new Date(year, month, 0).toISOString().split('T')[0];
+      const monthEnd = `${selectedMonth}-${new Date(year, month, 0).getDate()}`;
 
-      const [{ data: usersData, error: usersError }, { data: attendanceData, error: attendanceError }, { data: overridesData, error: overridesError }] = await Promise.all([
-        supabase
+      let usersQuery = supabase
           .from('users')
           .select('id, name, department')
           .eq('organization_id', organizationId)
           .in('role', ['admin', 'superadmin', 'user'])
-          .order('name'),
-        supabase
+          .order('name');
+      let attendanceQuery = supabase
           .from('attendance')
           .select('user_id, is_absent, is_late, is_early_out, is_half_day, is_regularized, effective_hours, punch_in_time')
           .eq('organization_id', organizationId)
           .gte('date', monthStart)
-          .lte('date', monthEnd),
-        supabase
+          .lte('date', monthEnd);
+      let overridesQuery = supabase
           .from('attendance_monthly_overrides')
           .select('user_id, payload, source, approved_at, created_at')
           .eq('organization_id', organizationId)
           .eq('year', year)
-          .eq('month', month)
+          .eq('month', month);
+
+      // Apply ownership filters before any request is sent.
+      if (!isAdmin) {
+        usersQuery = usersQuery.eq('id', currentUserId);
+        attendanceQuery = attendanceQuery.eq('user_id', currentUserId);
+        overridesQuery = overridesQuery.eq('user_id', currentUserId);
+      }
+      const [{ data: usersData, error: usersError }, { data: attendanceData, error: attendanceError }, { data: overridesData, error: overridesError }] = await Promise.all([
+        usersQuery, attendanceQuery, overridesQuery
       ]);
 
       if (usersError) throw usersError;
       if (attendanceError) throw attendanceError;
       if (overridesError) throw overridesError;
 
-      const users = usersData || [];
+      const users = (usersData || []).filter(u => isAdmin || u.id === currentUserId);
       const records = attendanceData || [];
       const overrides = overridesData || [];
 
@@ -603,7 +746,7 @@ const AttendanceDashboard: React.FC = () => {
   };
 
   const fetchAIHealth = async () => {
-    if (!organizationId) return;
+    if (!organizationId || !isAdmin) return;
     try {
       const [{ data: runs }, { count }] = await Promise.all([
         supabase
@@ -629,6 +772,7 @@ const AttendanceDashboard: React.FC = () => {
   };
 
   const handleRegularizeAttendance = async (attendanceId: string, reason: string) => {
+    if (!isAdmin) return;
     try {
       const { data: currentUser } = await supabase.auth.getUser();
       if (!currentUser.user?.id) return;
@@ -642,7 +786,7 @@ const AttendanceDashboard: React.FC = () => {
       if (!adminData) return;
 
       // Direct admin regularization
-      await supabase
+      const { error: regularizeError } = await supabase
         .from('attendance')
         .update({
           is_regularized: true,
@@ -653,6 +797,7 @@ const AttendanceDashboard: React.FC = () => {
           is_early_out: false
         })
         .eq('id', attendanceId);
+      if (regularizeError) throw regularizeError;
 
       // Refresh data
       fetchAttendanceData();
@@ -664,6 +809,8 @@ const AttendanceDashboard: React.FC = () => {
   };
 
   const handleApproveRegularization = async (id: string, remarks?: string) => {
+    if (!isAdmin) return;
+    setOperationError('');
     try {
       const { data: currentUser } = await supabase.auth.getUser();
       if (!currentUser.user?.id) return;
@@ -680,10 +827,13 @@ const AttendanceDashboard: React.FC = () => {
       fetchAttendanceData();
     } catch (error) {
       console.error('Error approving regularization:', error);
+      setOperationError((error as { message?: string })?.message || 'Unable to approve this attendance request.');
     }
   };
 
   const handleRejectRegularization = async (id: string, remarks?: string) => {
+    if (!isAdmin) return;
+    setOperationError('');
     try {
       const { data: currentUser } = await supabase.auth.getUser();
       if (!currentUser.user?.id) return;
@@ -700,6 +850,7 @@ const AttendanceDashboard: React.FC = () => {
       fetchAttendanceData();
     } catch (error) {
       console.error('Error rejecting regularization:', error);
+      setOperationError((error as { message?: string })?.message || 'Unable to reject this attendance request.');
     }
   };
 
@@ -774,6 +925,10 @@ const AttendanceDashboard: React.FC = () => {
 
   const stats = getAttendanceStats();
 
+  if (initializationError) {
+    return <div role="alert" className="rounded-lg bg-red-50 p-4 text-red-700">{initializationError}</div>;
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -784,11 +939,13 @@ const AttendanceDashboard: React.FC = () => {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
+      {operationError && <p role="alert" className="rounded-lg bg-red-50 p-4 text-sm text-red-700">{operationError}</p>}
+      {can('attendance.approve') && <div className="flex flex-wrap gap-4 text-sm font-medium text-blue-700"><button onClick={() => navigate('/attendance/team')}>View team attendance →</button><button onClick={() => navigate('/approvals?kind=correction')}>Review attendance requests →</button></div>}
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-semibold">Attendance Dashboard</h2>
+          <h2 className="text-2xl font-semibold">{isAdmin ? 'Attendance Dashboard' : 'My Attendance'}</h2>
           <p className="text-gray-600">
-            Monitor daily attendance and manage regularizations
+            {isAdmin ? 'Monitor attendance, mark employee punches and manage regularizations' : 'View your daily and monthly attendance'}
             {currentUserRole && currentUserRole !== 'admin' && currentUserRole !== 'superadmin' && (
               <span className="ml-2 px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
                 Personal View
@@ -808,14 +965,14 @@ const AttendanceDashboard: React.FC = () => {
             onChange={(e) => setSelectedDate(e.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 flex-shrink-0"
           />
-          <button
+          {isAdmin && <button
             onClick={() => setShowRegularizations(true)}
             className="flex items-center gap-2 px-3 py-2 sm:px-4 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm sm:text-base"
           >
             <HiExclamationCircle className="w-4 h-4" />
             <span className="hidden sm:inline">Regularizations</span>
             <span className="sm:hidden">Reg.</span> ({regularizations.length})
-          </button>
+          </button>}
           {(currentUserRole === 'admin' || currentUserRole === 'superadmin') && (
             <button
               onClick={handleCloseStaleOpenSessions}
@@ -831,10 +988,25 @@ const AttendanceDashboard: React.FC = () => {
       </div>
 
       {/* Punch In/Out Section */}
-      <PunchInOut />
+      <div id="punch" className="scroll-mt-24">
+        {isAdmin ? (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+            Mark attendance using Punch in or Punch out in each employee's row below, including your own.
+            Admin entries require no GPS, location permission or selfie.
+          </div>
+        ) : <PunchInOut key={punchVersion} />}
+      </div>
+
+      {organizationId && currentUserId && <AttendanceCorrections
+        organizationId={organizationId}
+        userId={currentUserId}
+        isAdmin={isAdmin}
+        selectedDate={selectedDate}
+        onChanged={() => { setPunchVersion(value => value + 1); void fetchAttendanceData(true); void fetchMonthlyCumulative(); }}
+      />}
 
       {/* AI-native attendance controls */}
-      <div className="bg-white rounded-lg shadow p-4">
+      {isAdmin && <div className="bg-white rounded-lg shadow p-4">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div>
             <h3 className="text-base font-semibold text-gray-900">AI Attendance Intelligence</h3>
@@ -857,16 +1029,16 @@ const AttendanceDashboard: React.FC = () => {
             </button>
           </div>
         </div>
-      </div>
+      </div>}
 
-      {duplicateRowsCollapsed > 0 && (
+      {isAdmin && duplicateRowsCollapsed > 0 && (
         <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
           Collapsed {duplicateRowsCollapsed} duplicate attendance row(s) for this date due to overlapping shift assignments.
         </div>
       )}
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
+      {isAdmin && <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
         <div className="bg-white p-6 rounded-lg shadow">
           <div className="flex items-center">
             <div className="flex-shrink-0">
@@ -938,13 +1110,13 @@ const AttendanceDashboard: React.FC = () => {
             </div>
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* Monthly cumulative attendance */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-lg font-medium">Monthly Cumulative Attendance</h3>
+            <h3 className="text-lg font-medium">{isAdmin ? 'Monthly Cumulative Attendance' : 'My Monthly Attendance'}</h3>
             <p className="text-xs text-gray-500">System totals merged with approved monthly overrides where present.</p>
           </div>
           <input
@@ -1018,7 +1190,7 @@ const AttendanceDashboard: React.FC = () => {
       {/* Attendance Table */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200">
-          <h3 className="text-lg font-medium">Attendance for {new Date(selectedDate).toLocaleDateString()}</h3>
+          <h3 className="text-lg font-medium">{isAdmin ? 'Attendance' : 'My Attendance'} for {new Date(selectedDate).toLocaleDateString()}</h3>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
@@ -1229,7 +1401,20 @@ const AttendanceDashboard: React.FC = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     <div className="flex gap-2">
-                      {(record.is_late || record.is_early_out) && !record.is_regularized && record.punch_in_time && (
+                      {isAdmin && selectedDate <= attendanceToday() && (
+                        <button
+                          onClick={() => setAdminPunch({
+                            employee: { id: record.user_id, name: record.user?.name || 'employee' },
+                            date: selectedDate,
+                            action: record.punch_in_time && !record.punch_out_time ? 'out' : 'in',
+                            punchInTime: record.punch_in_time && !record.punch_out_time ? record.punch_in_time : undefined,
+                          })}
+                          className="text-blue-600 hover:text-blue-900"
+                        >
+                          {record.punch_in_time && !record.punch_out_time ? 'Punch out' : record.punch_out_time ? 'Punch in again' : 'Punch in'}
+                        </button>
+                      )}
+                      {isAdmin && (record.is_late || record.is_early_out) && !record.is_regularized && record.punch_in_time && (
                         <button
                           onClick={() => {
                             const reason = prompt('Enter regularization reason:');
@@ -1259,7 +1444,7 @@ const AttendanceDashboard: React.FC = () => {
               {attendance.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
-                    No employees found for this organization
+                    {isAdmin ? 'No employees found for this organization' : 'No attendance found for this date'}
                   </td>
                 </tr>
               )}
@@ -1268,18 +1453,31 @@ const AttendanceDashboard: React.FC = () => {
         </div>
       </div>
 
-      <RegularizationModal
+      {isAdmin && adminPunch && <AdminMarkAttendance
+        {...adminPunch}
+        onClose={() => setAdminPunch(null)}
+        onSaved={() => {
+          setAdminPunch(null);
+          setPunchVersion(value => value + 1);
+          void fetchAttendanceData(true);
+          void fetchMonthlyCumulative();
+        }}
+      />}
+
+      {isAdmin && <RegularizationModal
         isOpen={showRegularizations}
         onClose={() => setShowRegularizations(false)}
         regularizations={regularizations}
         onApprove={handleApproveRegularization}
         onReject={handleRejectRegularization}
-      />
+      />}
 
       <AttendanceDetailModal
         isOpen={showAttendanceDetail}
         onClose={() => setShowAttendanceDetail(false)}
         attendance={selectedAttendance}
+        isAdmin={currentUserRole === 'admin' || currentUserRole === 'superadmin'}
+        onChanged={fetchAttendanceData}
       />
     </div>
   );

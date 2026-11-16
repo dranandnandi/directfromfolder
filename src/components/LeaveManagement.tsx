@@ -12,6 +12,10 @@ import {
 } from 'react-icons/hi';
 import { supabase } from '../utils/supabaseClient';
 import { sendWhatsAppMessage } from '../utils/whatsappUtils';
+import { staffWorkflowService, workflowError } from '../services/staffWorkflowService';
+import { leaveStatus, overlappingLeave } from '../utils/staffWorkflows';
+import { attendanceToday } from '../utils/attendanceCorrection';
+import { staffAccessService } from '../services/staffAccessService';
 import {
   LeaveBalance,
   LeavePolicy,
@@ -128,17 +132,12 @@ const describeLeave = (request: { leave_type: string; leave_category?: string })
   return request.leave_category ? `${request.leave_category} · ${duration}` : duration;
 };
 
-const buildDecisionBlock = (action: 'approve' | 'reject', adminName: string, comment?: string) =>
-  `\n\n---\nDECISION: ${action === 'approve' ? 'APPROVED' : 'REJECTED'}` +
-  `\nDecided By: ${adminName}` +
-  `\nDecided At: ${new Date().toISOString()}` +
-  `\nDecision Note: ${comment?.trim() || (action === 'approve' ? 'Approved' : 'No reason provided')}`;
-
 interface LeaveRequestFormProps {
   userId: string;
   policy: LeavePolicy;
   /** The requesting user's own balances for the current leave year. */
   balances: LeaveBalance[];
+  requests: ExistingLeaveRequest[];
   onClose: () => void;
   onSubmit: () => void;
 }
@@ -166,6 +165,7 @@ const LeaveRequestForm: React.FC<LeaveRequestFormProps> = ({
   userId,
   policy,
   balances,
+  requests,
   onClose,
   onSubmit
 }) => {
@@ -183,10 +183,12 @@ const LeaveRequestForm: React.FC<LeaveRequestFormProps> = ({
   // Live quota check for the chosen category. Over-quota requests are allowed
   // through with a warning - the admin makes the final call.
   const currentBalance = balances.find(b => b.code === formData.leave_category);
-  const requestedDays = formData.start_date ? leaveDaysForRequest(formData) : 0;
+  const requestedDays = formData.start_date ? leaveDaysForRequest(formData, policy) : 0;
+  const currentYearDays = formData.start_date ? leaveDaysForRequest(formData, policy, getLeaveYear(policy)) : 0;
   const exceedsQuota = !!currentBalance
     && currentBalance.annual_quota > 0
-    && requestedDays > currentBalance.remaining;
+    && currentYearDays > currentBalance.remaining;
+  const overlap = overlappingLeave(requests, formData.start_date, formData.leave_type === 'full_day' ? formData.end_date : undefined);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -194,6 +196,7 @@ const LeaveRequestForm: React.FC<LeaveRequestFormProps> = ({
     setError('');
 
     try {
+      if (overlap) throw new Error(`These dates overlap your ${overlap.status} leave (${overlap.start_date} to ${overlap.end_date || overlap.start_date}). Cancel it first or choose different dates.`);
       // Get the user's organization and find the admin
       const { data: userData, error: userError } = await supabase
         .from('users')
@@ -215,20 +218,10 @@ const LeaveRequestForm: React.FC<LeaveRequestFormProps> = ({
       }
 
       // Find the admin for this organization
-      const { data: adminData, error: adminError } = await supabase
-        .from('users')
-        .select('id, name')
-        .eq('organization_id', userData.organization_id)
-        .in('role', ['admin', 'superadmin'])
-        .limit(1);
-
-      if (adminError) {
-        console.error('Admin lookup error:', adminError);
-        throw new Error(`Failed to find organization admin: ${adminError.message}`);
-      }
+      const adminData = await staffAccessService.approvers();
 
       if (!adminData || adminData.length === 0) {
-        throw new Error('No admin found for your organization. Please contact your system administrator.');
+        throw new Error('No eligible leave approver found. Please contact your administrator.');
       }
 
       const adminId = adminData[0].id;
@@ -261,6 +254,7 @@ ${isPostFacto ? 'POST FACTO REQUEST: This leave has already been taken' : ''}
 Please review and approve/reject this leave request.`,
             assigned_to: adminId, // Assign to admin for approval
             created_by: userData.id, // Track who created the request - use database user ID
+            organization_id: userData.organization_id,
             type: 'personalTask', // Use valid task type for leave requests
             priority: formData.is_emergency ? 'critical' : isPostFacto ? 'moderate' : 'lessImportant',
             status: 'pending',
@@ -313,6 +307,7 @@ Please review and approve/reject in the Task Manager app.`;
 
       onSubmit();
       onClose();
+      window.dispatchEvent(new Event('staff-workflow-updated'));
     } catch (err: any) {
       setError(err.message || 'Failed to submit leave request');
     } finally {
@@ -324,7 +319,7 @@ Please review and approve/reject in the Task Manager app.`;
 
   return (
     <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-      <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+      <div className="relative top-8 mx-auto mb-12 w-[calc(100%-2rem)] max-w-lg rounded-xl border bg-white p-5 shadow-lg">
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-medium text-gray-900">Request Leave</h3>
           <button
@@ -368,7 +363,7 @@ Please review and approve/reject in the Task Manager app.`;
             </label>
             <select
               value={formData.leave_type}
-              onChange={(e) => setFormData({ ...formData, leave_type: e.target.value })}
+              onChange={(e) => setFormData({ ...formData, leave_type: e.target.value, end_date: '' })}
               className="w-full border border-gray-300 rounded-md px-3 py-2"
               required
             >
@@ -439,17 +434,20 @@ Please review and approve/reject in the Task Manager app.`;
             </label>
           </div>
 
+          {formData.start_date && <p className="text-sm text-gray-600">This request uses {requestedDays} leave day{requestedDays === 1 ? '' : 's'} under your organization's leave calendar. {requestedDays !== currentYearDays ? `${currentYearDays} fall in the current leave year.` : ''}</p>}
+
           {exceedsQuota && currentBalance && (
             <div className="flex items-start bg-orange-50 border border-orange-200 rounded-md p-2 text-orange-700 text-sm">
               <HiExclamationCircle className="w-4 h-4 mr-1 mt-0.5 flex-shrink-0" />
               <span>
-                This request needs {requestedDays} day{requestedDays === 1 ? '' : 's'} but you have only{' '}
+                This request needs {currentYearDays} day{currentYearDays === 1 ? '' : 's'} this leave year but you have only{' '}
                 {Math.max(0, currentBalance.remaining)} {currentBalance.code} left this leave year.
                 You can still submit it; the admin will decide.
               </span>
             </div>
           )}
 
+          {overlap && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Overlaps your {overlap.status} leave from {overlap.start_date} to {overlap.end_date || overlap.start_date}. Choose other dates or cancel that request.</p>}
           {error && (
             <div className="text-red-600 text-sm">{error}</div>
           )}
@@ -483,7 +481,11 @@ const LeaveManagement: React.FC<{ userId: string; isAdmin?: boolean }> = ({
   const [showForm, setShowForm] = useState(false);
   const [leaveRequests, setLeaveRequests] = useState<ExistingLeaveRequest[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'cancelled'>('all');
+  const [workflowProblem, setWorkflowProblem] = useState('');
+  const [cancelTarget, setCancelTarget] = useState<ExistingLeaveRequest | null>(null);
+  const [cancelNote, setCancelNote] = useState('');
+  const [cancelling, setCancelling] = useState(false);
   const [sendingWhatsApp, setSendingWhatsApp] = useState<string | null>(null);
   const [viewingReasonId, setViewingReasonId] = useState<string | null>(null);
   
@@ -504,7 +506,7 @@ const LeaveManagement: React.FC<{ userId: string; isAdmin?: boolean }> = ({
 
   useEffect(() => {
     fetchLeaveRequests();
-  }, [userId]);
+  }, [userId, isAdmin]);
 
   const fetchLeaveRequests = async () => {
     try {
@@ -541,13 +543,11 @@ const LeaveManagement: React.FC<{ userId: string; isAdmin?: boolean }> = ({
         // approval flow overwrote the title with the decision text, which hid
         // every decided request from this list.
         .eq('type', 'personalTask')
+        .eq('organization_id', userData.organization_id)
         .or('title.ilike."%Leave Request%",description.ilike."%LEAVE REQUEST DETAILS%"')
         .order('created_at', { ascending: false });
 
-      if (isAdmin) {
-        // Admin sees leave requests assigned to them (for approval) AND requests they created
-        query = query.or(`assigned_to.eq.${dbUserId},created_by.eq.${dbUserId}`);
-      } else {
+      if (!isAdmin) {
         // Regular users see leave requests they created
         query = query.eq('created_by', dbUserId);
       }
@@ -567,14 +567,13 @@ const LeaveManagement: React.FC<{ userId: string; isAdmin?: boolean }> = ({
           id: request.id,
           leave_type: details.leave_type || 'full_day',
           leave_category: details.leave_category,
-          start_date: startDate,
-          end_date: details.end_date,
+          start_date: request.leave_start_date || startDate,
+          end_date: request.leave_end_date || details.end_date,
           reason: details.reason || request.description || '',
           // 'rejected' is what whatsapp-approve-leave writes; 'cancelled' is what
           // this screen and the performance report views use. Accept both, or a
           // request rejected over WhatsApp silently reads back as pending.
-          status: request.status === 'completed' ? 'approved' :
-            (request.status === 'cancelled' || request.status === 'rejected') ? 'rejected' : 'pending',
+          status: leaveStatus(request.status, request.leave_cancelled_at),
           is_post_facto: isPostFacto,
           requested_at: request.created_at,
           comments: request.title,
@@ -599,12 +598,14 @@ const LeaveManagement: React.FC<{ userId: string; isAdmin?: boolean }> = ({
       case 'approved': return 'bg-green-100 text-green-800';
       case 'rejected': return 'bg-red-100 text-red-800';
       case 'pending': return 'bg-yellow-100 text-yellow-800';
+      case 'cancelled': return 'bg-gray-100 text-gray-700';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
 
   // Open approval modal
   const openApprovalModal = (request: ExistingLeaveRequest, action: 'approve' | 'reject') => {
+    setWorkflowProblem('');
     setApprovalModal({
       isOpen: true,
       requestId: request.id,
@@ -621,112 +622,26 @@ const LeaveManagement: React.FC<{ userId: string; isAdmin?: boolean }> = ({
   };
 
   const handleLeaveApproval = async (requestId: string, action: 'approve' | 'reject', comments?: string) => {
+    setIsProcessingApproval(true); setWorkflowProblem('');
     try {
-      setIsProcessingApproval(true);
-      
-      // Get the request details first
-      const request = leaveRequests.find(r => r.id === requestId);
-      if (!request) {
-        throw new Error('Leave request not found');
-      }
-
-      // Resolve the acting admin first - their name goes into the decision trail.
-      const { data: currentUser } = await supabase.auth.getUser();
-      const { data: adminData } = await supabase
-        .from('users')
-        .select('name')
-        .eq('auth_id', currentUser?.user?.id)
-        .maybeSingle();
-
-      const adminName = adminData?.name || 'Admin';
-
-      // Re-read the description so the decision is appended to current content.
-      const { data: taskRow, error: taskReadError } = await supabase
-        .from('tasks')
-        .select('description')
-        .eq('id', requestId)
-        .single();
-
-      if (taskReadError) throw taskReadError;
-
-      const status = action === 'approve' ? 'completed' : 'cancelled';
-      const { error } = await supabase
-        .from('tasks')
-        .update({
-          status,
-          completed_at: action === 'approve' ? new Date().toISOString() : null,
-          updated_at: new Date().toISOString(),
-          // The title is what identifies this row as a leave request, so the
-          // decision goes in the description instead of overwriting it.
-          description: `${taskRow?.description || ''}${buildDecisionBlock(action, adminName, comments)}`
-        })
-        .eq('id', requestId);
-
-      if (error) throw error;
-
-      // Notify the employee of the decision
-      let notificationWarning = '';
-
-      if (request.created_by) {
-        const { data: employeeData } = await supabase
-          .from('users')
-          .select('whatsapp_number, name')
-          .eq('id', request.created_by)
-          .maybeSingle();
-
-        const leaveTypeDisplay = describeLeave(request);
-        const startDateFormatted = new Date(request.start_date).toLocaleDateString();
-        const endDateFormatted = request.end_date ? new Date(request.end_date).toLocaleDateString() : null;
-
-        const statusEmoji = action === 'approve' ? '✅' : '❌';
-        const statusText = action === 'approve' ? 'APPROVED' : 'REJECTED';
-
-        const employeeMessage = `${statusEmoji} *Leave Request ${statusText}*
-
-Dear ${employeeData?.name || 'Colleague'},
-
-Your leave request has been *${statusText.toLowerCase()}* by ${adminName}.
-
-📋 *Leave Type:* ${leaveTypeDisplay}
-📅 *Date:* ${startDateFormatted}${endDateFormatted ? ` - ${endDateFormatted}` : ''}
-📝 *Your Reason:* ${request.reason}
-${comments ? `\n💬 *Admin's Comment:* ${comments}` : ''}
-
-${action === 'approve' ? 'Enjoy your leave! 🌴' : 'Please contact your admin if you have questions.'}`;
-
-        // Record the decision even when there is no WhatsApp number on file, so
-        // the employee is never left without any record of the outcome.
-        const { error: notifError } = await supabase
-          .from('notifications')
-          .insert({
-            user_id: request.created_by,
-            task_id: requestId,
-            type: action === 'approve' ? 'leave_request_approved' : 'leave_request_rejected',
-            title: `Leave Request ${statusText}`,
-            message: `Your leave request for ${leaveTypeDisplay} on ${startDateFormatted} has been ${statusText.toLowerCase()}${comments ? `. Reason: ${comments}` : ''}`,
-            whatsapp_number: employeeData?.whatsapp_number || null,
-            ai_generated_message: employeeMessage,
-            whatsapp_sent: false
-          });
-
-        if (notifError) {
-          console.error('Failed to create employee notification:', notifError);
-          notificationWarning = 'The decision was saved, but notifying the employee failed. Please inform them directly.';
-        } else if (!employeeData?.whatsapp_number) {
-          notificationWarning = 'The decision was saved, but this employee has no WhatsApp number on file, so no message could be sent.';
-        }
-      }
-
-      // Close modal and refresh
+      await staffWorkflowService.decideLeave(requestId, action, comments || '');
       closeApprovalModal();
-      if (notificationWarning) alert(notificationWarning);
+      window.dispatchEvent(new Event('staff-workflow-updated'));
       await fetchLeaveRequests();
-    } catch (error) {
-      console.error('Error updating leave request:', error);
-      alert('Failed to update leave request. Please try again.');
-    } finally {
-      setIsProcessingApproval(false);
-    }
+    } catch (error) { setWorkflowProblem(workflowError(error)); }
+    finally { setIsProcessingApproval(false); }
+  };
+
+  const handleCancelLeave = async () => {
+    if (!cancelTarget) return;
+    setCancelling(true); setWorkflowProblem('');
+    try {
+      await staffWorkflowService.decideLeave(cancelTarget.id, 'cancel', cancelNote);
+      setCancelTarget(null);
+      window.dispatchEvent(new Event('staff-workflow-updated'));
+      await fetchLeaveRequests();
+    } catch (error) { setWorkflowProblem(workflowError(error)); }
+    finally { setCancelling(false); }
   };
 
   const handleOpenWhatsAppLink = async (request: ExistingLeaveRequest) => {
@@ -852,7 +767,7 @@ ${action === 'approve' ? 'Enjoy your leave! 🌴' : 'Please contact your admin i
   const employeeBalance = pendingRequest?.leave_category
     ? balancesFor(pendingRequest.created_by).find(b => b.code === pendingRequest.leave_category)
     : undefined;
-  const pendingRequestDays = pendingRequest ? leaveDaysForRequest(pendingRequest) : 0;
+  const pendingRequestDays = pendingRequest ? leaveDaysForRequest(pendingRequest, policy, leaveYear) : 0;
   const pendingExceedsQuota = !!employeeBalance
     && employeeBalance.annual_quota > 0
     && pendingRequestDays > employeeBalance.remaining;
@@ -953,12 +868,13 @@ ${action === 'approve' ? 'Enjoy your leave! 🌴' : 'Please contact your admin i
 
         {/* Filter Tabs */}
         <div className="mb-6">
-          <nav className="flex space-x-8">
+          <nav className="flex gap-6 overflow-x-auto">
             {[
               { id: 'all', label: 'All Requests' },
               { id: 'pending', label: 'Pending' },
               { id: 'approved', label: 'Approved' },
-              { id: 'rejected', label: 'Rejected' }
+              { id: 'rejected', label: 'Rejected' },
+              { id: 'cancelled', label: 'Cancelled' }
             ].map(tab => (
               <button
                 key={tab.id}
@@ -1072,6 +988,7 @@ ${action === 'approve' ? 'Enjoy your leave! 🌴' : 'Please contact your admin i
                           )}
                         </div>
                       )}
+                      {request.created_by === currentUserDbId && (request.status === 'pending' || (request.status === 'approved' && request.start_date >= attendanceToday())) && <button type="button" onClick={() => { setCancelTarget(request); setCancelNote(''); setWorkflowProblem(''); }} className="mt-2 block rounded-lg border px-3 py-2 text-xs font-medium text-gray-700">Cancel leave</button>}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {new Date(request.requested_at).toLocaleDateString()}
@@ -1082,6 +999,7 @@ ${action === 'approve' ? 'Enjoy your leave! 🌴' : 'Please contact your admin i
                           <div className="flex space-x-2">
                             <button
                               onClick={() => openApprovalModal(request, 'approve')}
+                              disabled={request.created_by === currentUserDbId}
                               className="text-green-600 hover:text-green-900 flex items-center"
                               title="Approve"
                             >
@@ -1089,6 +1007,7 @@ ${action === 'approve' ? 'Enjoy your leave! 🌴' : 'Please contact your admin i
                             </button>
                             <button
                               onClick={() => openApprovalModal(request, 'reject')}
+                              disabled={request.created_by === currentUserDbId}
                               className="text-red-600 hover:text-red-900 flex items-center"
                               title="Reject"
                             >
@@ -1145,12 +1064,15 @@ ${action === 'approve' ? 'Enjoy your leave! 🌴' : 'Please contact your admin i
           userId={userId}
           policy={policy}
           balances={myBalances}
+          requests={leaveRequests.filter(request => request.created_by === currentUserDbId)}
           onClose={() => setShowForm(false)}
           onSubmit={fetchLeaveRequests}
         />
       )}
 
       {/* Full Reason Modal */}
+      {workflowProblem && <p role="alert" className="rounded-lg bg-red-50 p-4 text-sm text-red-700">{workflowProblem}</p>}
+      {cancelTarget && <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-12"><form onSubmit={event => { event.preventDefault(); void handleCancelLeave(); }} className="w-full max-w-lg space-y-4 rounded-xl bg-white p-5 shadow-xl" aria-label="Cancel leave request"><h2 className="text-lg font-semibold">Cancel this leave?</h2><p className="text-sm text-gray-600">{cancelTarget.start_date} to {cancelTarget.end_date || cancelTarget.start_date}. Cancelled leave stops consuming your balance. Approved leave can be cancelled before it starts, provided payroll is still open.</p><label className="block text-sm font-medium">Note (optional)<textarea maxLength={2000} rows={3} value={cancelNote} onChange={event => setCancelNote(event.target.value)} disabled={cancelling} className="mt-1 block w-full rounded-lg border p-3" /></label>{workflowProblem && <p role="alert" className="text-sm text-red-700">{workflowProblem}</p>}<div className="flex gap-2"><button disabled={cancelling} className="rounded-lg bg-red-600 px-4 py-3 text-sm font-medium text-white disabled:opacity-50">{cancelling ? 'Cancelling...' : 'Confirm cancellation'}</button><button type="button" disabled={cancelling} onClick={() => setCancelTarget(null)} className="rounded-lg border px-4 py-3 text-sm">Keep leave</button></div></form></div>}
       {viewingReasonId && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
           <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
@@ -1173,7 +1095,7 @@ ${action === 'approve' ? 'Enjoy your leave! 🌴' : 'Please contact your admin i
       {/* Approval/Rejection Modal */}
       {approvalModal.isOpen && approvalModal.request && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-[450px] shadow-lg rounded-md bg-white">
+          <div className="relative top-8 mx-auto mb-12 w-[calc(100%-2rem)] max-w-lg rounded-xl border bg-white p-5 shadow-lg">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-medium text-gray-900">
                 {approvalModal.action === 'approve' ? '✅ Approve Leave Request' : '❌ Reject Leave Request'}
@@ -1226,10 +1148,13 @@ ${action === 'approve' ? 'Enjoy your leave! 🌴' : 'Please contact your admin i
             {/* Comment Input */}
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                {approvalModal.action === 'approve' ? 'Comment (optional)' : 'Reason for Rejection (recommended)'}
+              {approvalModal.action === 'approve' ? 'Comment (optional)' : 'Reason for Rejection (required)'}
               </label>
               <textarea
                 value={approvalReason}
+                required={approvalModal.action === 'reject'}
+                minLength={approvalModal.action === 'reject' ? 3 : undefined}
+                maxLength={2000}
                 onChange={(e) => setApprovalReason(e.target.value)}
                 rows={3}
                 className="w-full border border-gray-300 rounded-md px-3 py-2"
@@ -1245,9 +1170,10 @@ ${action === 'approve' ? 'Enjoy your leave! 🌴' : 'Please contact your admin i
                 ? 'bg-green-50 text-green-700' 
                 : 'bg-red-50 text-red-700'
             }`}>
-              📱 The employee will automatically receive a WhatsApp notification about this decision.
+              📱 The employee will see this decision in the app. You can resend it through WhatsApp after saving.
             </div>
 
+            {workflowProblem && <p role="alert" className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{workflowProblem}</p>}
             {/* Action Buttons */}
             <div className="flex space-x-3">
               <button

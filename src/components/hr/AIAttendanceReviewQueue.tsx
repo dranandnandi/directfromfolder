@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useOrganization } from "../../contexts/OrganizationContext";
 import { supabase } from "../../utils/supabaseClient";
+import { staffWorkflowService } from '../../services/staffWorkflowService';
 
 type QueueRow = {
   id: string;
@@ -22,6 +23,7 @@ export default function AIAttendanceReviewQueue() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [reviewNote, setReviewNote] = useState('');
 
   const unresolvedCount = useMemo(() => rows.filter((r) => !r.reviewed_at).length, [rows]);
 
@@ -55,24 +57,15 @@ export default function AIAttendanceReviewQueue() {
     setLoading(true);
     setError(null);
     try {
-      const now = new Date().toISOString();
-      const updates = ids.map((id) =>
-        supabase
-          .from("attendance_ai_decisions")
-          .update({
-            reviewed_at: now,
-            decision_payload: {
-              review_action: approved ? "approved" : "rejected",
-              reviewed_at: now,
-            },
-          })
-          .eq("id", id),
-      );
-      await Promise.all(updates);
+      if (!approved && reviewNote.trim().length < 3) throw new Error('Give a reason for rejecting the selected suggestions.');
+      for (const id of ids) await staffWorkflowService.review('ai_review', id, approved ? 'approve' : 'reject', reviewNote);
       setSelected(new Set());
+      setReviewNote('');
+      window.dispatchEvent(new Event('staff-workflow-updated'));
       await load();
     } catch (e: any) {
-      setError(e?.message || "Failed to update selected rows");
+      await load(); setSelected(new Set());
+      setError(e?.message || 'Some selected reviews could not be saved. The list has been refreshed.');
     } finally {
       setLoading(false);
     }
@@ -112,6 +105,7 @@ export default function AIAttendanceReviewQueue() {
 
         {error && <div className="mb-3 rounded bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
+        <label className="mb-4 block text-sm font-medium text-gray-700">Review note (required for rejection)<textarea value={reviewNote} onChange={event => setReviewNote(event.target.value)} maxLength={2000} rows={2} className="mt-1 block w-full rounded-lg border p-3" /></label>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50">

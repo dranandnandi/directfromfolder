@@ -1,6 +1,6 @@
 import { supabase } from '../utils/supabaseClient';
 import { Shift, EmployeeShift, Attendance, AttendanceSession, AttendanceRegularization, PunchData, AttendanceSummary } from '../models/attendance';
-import { calculateDistance, parseGeofenceSettings } from '../utils/geolocation';
+import { validateGeofencePosition } from '../utils/geolocation';
 
 export class AttendanceService {
   static async getOrganizationEmployees(organizationId: string): Promise<Array<{
@@ -259,53 +259,12 @@ export class AttendanceService {
       .eq('id', organizationId)
       .single();
 
-    if (orgError) {
+    if (orgError || !orgData) {
       console.error('Error fetching organization geofence settings:', orgError);
-      return { isValid: true, distance: null, isOutsideGeofence: false };
+      throw new Error('Unable to verify attendance location settings. Please try again.');
     }
 
-    // If no organization location configured, allow punch
-    if (!orgData.location_latitude || !orgData.location_longitude) {
-      console.log('No organization location configured, allowing punch');
-      return { isValid: true, distance: null, isOutsideGeofence: false };
-    }
-
-    // Parse geofence settings
-    const settings = parseGeofenceSettings(orgData.geofence_settings);
-
-    // If geofencing is disabled, allow punch
-    if (!settings.enabled) {
-      console.log('Geofencing is disabled, allowing punch');
-      return { isValid: true, distance: null, isOutsideGeofence: false };
-    }
-
-    // Calculate distance
-    const distance = calculateDistance(
-      latitude,
-      longitude,
-      orgData.location_latitude,
-      orgData.location_longitude
-    );
-
-    console.log(`Distance from organization: ${distance.toFixed(2)}m (threshold: ${settings.distance_threshold_meters}m)`);
-
-    const isOutsideGeofence = distance > settings.distance_threshold_meters;
-
-    // Strict mode: block punch if outside geofence
-    if (isOutsideGeofence && settings.enforcement_mode === 'strict') {
-      throw new Error(
-        `You are ${distance.toFixed(0)}m away from the organization location. ` +
-        `Punch is not allowed beyond ${settings.distance_threshold_meters}m. ` +
-        `Please move closer or contact your administrator.`
-      );
-    }
-
-    // Warning mode: allow but flag
-    return {
-      isValid: true,
-      distance: Math.round(distance * 100) / 100, // Round to 2 decimals
-      isOutsideGeofence,
-    };
+    return validateGeofencePosition(orgData, latitude, longitude);
   }
 
   // ========== EMPLOYEE SHIFT ASSIGNMENT ==========
@@ -447,6 +406,24 @@ export class AttendanceService {
 
   // ========== ATTENDANCE TRACKING ==========
 
+  /** Admin-only, audited attendance entry. Authorization is enforced by the RPC. */
+  static async adminMarkPunch(
+    userId: string,
+    date: string,
+    action: 'in' | 'out',
+    punchTime: string,
+    reason: string
+  ): Promise<void> {
+    const { error } = await supabase.rpc('fn_admin_mark_attendance_punch', {
+      p_user_id: userId,
+      p_date: date,
+      p_action: action,
+      p_punch_time: punchTime,
+      p_reason: reason.trim(),
+    });
+    if (error) throw error;
+  }
+
   static async punchIn(userId: string, punchData: PunchData): Promise<Attendance> {
     const currentTime = new Date().toISOString();
 
@@ -465,15 +442,11 @@ export class AttendanceService {
 
     if (!userData) throw new Error('User not found');
 
-    // Validate geofence if coordinates are provided
-    let geofenceResult = { isValid: true, distance: null as number | null, isOutsideGeofence: false };
-    if (punchData.latitude && punchData.longitude) {
-      geofenceResult = await this.validateGeofence(
-        userData.organization_id,
-        punchData.latitude,
-        punchData.longitude
-      );
-    }
+    const geofenceResult = await this.validateGeofence(
+      userData.organization_id,
+      punchData.latitude,
+      punchData.longitude
+    );
 
     const currentShift = await this.getEmployeeCurrentShift(userId);
     const attendanceDate = this.resolveAttendanceDateForPunchIn(currentShift?.shift);
@@ -630,15 +603,11 @@ export class AttendanceService {
 
     if (!userData) throw new Error('User not found');
 
-    // Validate geofence if coordinates are provided
-    let geofenceResult = { isValid: true, distance: null as number | null, isOutsideGeofence: false };
-    if (punchData.latitude && punchData.longitude) {
-      geofenceResult = await this.validateGeofence(
-        userData.organization_id,
-        punchData.latitude,
-        punchData.longitude
-      );
-    }
+    const geofenceResult = await this.validateGeofence(
+      userData.organization_id,
+      punchData.latitude,
+      punchData.longitude
+    );
 
     // Session-based path: close the open session; the DB trigger updates the day row.
     const openSession = await this.getOpenSession(userId, 2);
@@ -801,6 +770,56 @@ export class AttendanceService {
     return this.getTodayAttendance(userId);
   }
 
+  // ========== PUNCH CORRECTIONS ==========
+
+  /**
+   * A punch session this short (punch-in to punch-out) counts as a mistake the
+   * employee can undo. Also the window for cancelling an open punch-in.
+   * Must match fn_undo_my_punch.
+   */
+  static readonly PUNCH_UNDO_WINDOW_MINUTES = 5;
+  /** How long after a short session's punch-out the employee may still undo it. */
+  static readonly PUNCH_UNDO_LOOKBACK_HOURS = 12;
+
+  /**
+   * 'in' cancels an open punch-in, 'out' reopens a short session (stays
+   * checked in), 'discard' deletes a short session.
+   */
+  static async undoMyPunch(kind: 'in' | 'out' | 'discard'): Promise<void> {
+    const { error } = await supabase.rpc('fn_undo_my_punch', { p_kind: kind });
+    if (error) throw error;
+  }
+
+  /** Admin: clear a punch-out so the day (or one session) is open again. */
+  static async adminReopenPunchOut(attendanceId: string, reason: string, sessionId?: string): Promise<void> {
+    const { error } = await supabase.rpc('fn_admin_reopen_punch_out', {
+      p_attendance_id: attendanceId,
+      p_reason: reason,
+      p_session_id: sessionId ?? null,
+    });
+    if (error) throw error;
+  }
+
+  /** Admin: delete a punch session, or the legacy punch of a pre-session day. */
+  static async adminDeletePunch(attendanceId: string, reason: string, sessionId?: string): Promise<void> {
+    const { error } = await supabase.rpc('fn_admin_delete_punch', {
+      p_attendance_id: attendanceId,
+      p_reason: reason,
+      p_session_id: sessionId ?? null,
+    });
+    if (error) throw error;
+  }
+
+  static async getAttendanceSessions(attendanceId: string): Promise<AttendanceSession[]> {
+    const { data, error } = await supabase
+      .from('attendance_sessions')
+      .select('*')
+      .eq('attendance_id', attendanceId)
+      .order('punch_in_time', { ascending: true });
+    if (error) throw error;
+    return data || [];
+  }
+
   static async getAttendanceHistory(userId: string, fromDate: string, toDate: string): Promise<Attendance[]> {
     const { data, error } = await supabase
       .from('attendance')
@@ -846,50 +865,13 @@ export class AttendanceService {
     return data;
   }
 
-  static async approveRegularization(id: string, adminId: string, remarks?: string): Promise<void> {
-    const { error } = await supabase
-      .from('attendance_regularizations')
-      .update({
-        status: 'approved',
-        approved_by: adminId,
-        admin_remarks: remarks,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', id);
-
+  static async approveRegularization(id: string, _adminId: string, remarks?: string): Promise<void> {
+    const { error } = await supabase.rpc('fn_review_staff_request', { p_kind: 'regularization', p_id: id, p_action: 'approve', p_note: remarks || '' });
     if (error) throw error;
-
-    // Update attendance record
-    const { data: regularization } = await supabase
-      .from('attendance_regularizations')
-      .select('attendance_id')
-      .eq('id', id)
-      .single();
-
-    if (regularization) {
-      await supabase
-        .from('attendance')
-        .update({
-          is_regularized: true,
-          regularized_by: adminId,
-          regularization_reason: remarks || '',
-          regularized_at: new Date().toISOString()
-        })
-        .eq('id', regularization.attendance_id);
-    }
   }
 
-  static async rejectRegularization(id: string, adminId: string, remarks?: string): Promise<void> {
-    const { error } = await supabase
-      .from('attendance_regularizations')
-      .update({
-        status: 'rejected',
-        approved_by: adminId,
-        admin_remarks: remarks,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', id);
-
+  static async rejectRegularization(id: string, _adminId: string, remarks?: string): Promise<void> {
+    const { error } = await supabase.rpc('fn_review_staff_request', { p_kind: 'regularization', p_id: id, p_action: 'reject', p_note: remarks || 'Rejected by administrator' });
     if (error) throw error;
   }
 
@@ -898,7 +880,7 @@ export class AttendanceService {
       .from('attendance_regularizations')
       .select(`
         *,
-        attendance:attendance(*),
+        attendance:attendance!inner(*),
         requester:users!requested_by(id, name, department)
       `)
       .eq('attendance.organization_id', organizationId)

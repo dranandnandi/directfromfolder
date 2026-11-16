@@ -1,12 +1,15 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { HiHome, HiClock, HiCalendar, HiDocumentText, HiMenu } from 'react-icons/hi';
+import { HiHome, HiClock, HiCalendar, HiClipboardList, HiCheckCircle, HiMenu } from 'react-icons/hi';
+import { useStaffAccess } from '../contexts/StaffAccessContext';
 
 interface BottomNavigationProps {
     onMenuClick: () => void;
+    userRole?: string;
 }
 
 const BottomNavigation: React.FC<BottomNavigationProps> = ({ onMenuClick }) => {
+    const { can } = useStaffAccess();
     const navigate = useNavigate();
     const location = useLocation();
 
@@ -18,9 +21,11 @@ const BottomNavigation: React.FC<BottomNavigationProps> = ({ onMenuClick }) => {
 
     const navItems = [
         { id: 'home', label: 'Home', icon: HiHome, path: '/' },
+        { id: 'tasks', label: 'Tasks', icon: HiClipboardList, path: '/tasks' },
         { id: 'attendance', label: 'Attendance', icon: HiClock, path: '/attendance' },
-        { id: 'leaves', label: 'Leaves', icon: HiCalendar, path: '/leaveManagement' },
-        { id: 'payslip', label: 'Payslip', icon: HiDocumentText, path: '/my-payslip' },
+        (can('leave.approve') || can('attendance.approve'))
+          ? { id: 'approvals', label: 'Approvals', icon: HiCheckCircle, path: '/approvals' }
+          : { id: 'leaves', label: 'Leaves', icon: HiCalendar, path: '/leaveManagement' },
     ];
 
     return (

@@ -6,7 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:attendance-corrections": "node scripts/test-attendance-corrections.mjs",
+    "test:admin-attendance": "node scripts/test-admin-attendance.mjs",
+    "test:staff-workflows": "node scripts/test-staff-workflows.mjs",
+    "test:training": "node scripts/test-training.mjs",
+    "test:staff-access": "node scripts/test-staff-access.mjs"
   },
   "dependencies": {
     "@capacitor/action-sheet": "^7.0.2",
@@ -44,6 +49,7 @@
     "uuid": "^11.0.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.16",
     "@types/react": "^18.2.15",
     "@types/react-dom": "^18.2.7",
     "@types/uuid": "^9.0.8",

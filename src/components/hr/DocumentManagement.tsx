@@ -34,19 +34,21 @@ interface DocumentManagementProps {
   organizationId: string;
   userId: string;
   userName?: string;
+  trainingOnly?: boolean;
 }
 
 const DocumentManagement: React.FC<DocumentManagementProps> = ({
   organizationId,
   userId,
-  userName
+  userName,
+  trainingOnly = false
 }) => {
   // State
   const [documents, setDocuments] = useState<OrganizationDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [selectedCategory, setSelectedCategory] = useState<string>(trainingOnly ? 'training' : 'all');
   const [stats, setStats] = useState<{ totalDocuments: number; totalSize: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -57,7 +59,7 @@ const DocumentManagement: React.FC<DocumentManagementProps> = ({
   // Upload modal state
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadCategory, setUploadCategory] = useState('general');
+  const [uploadCategory, setUploadCategory] = useState(trainingOnly ? 'training' : 'general');
   const [uploadDescription, setUploadDescription] = useState('');
   const [uploadTags, setUploadTags] = useState('');
   
@@ -81,7 +83,7 @@ const DocumentManagement: React.FC<DocumentManagementProps> = ({
           category: selectedCategory !== 'all' ? selectedCategory : undefined,
           searchTerm: searchTerm || undefined
         }),
-        documentService.getDocumentStats(organizationId)
+        documentService.getDocumentStats(organizationId, trainingOnly ? 'training' : undefined)
       ]);
       
       setDocuments(docs);
@@ -92,7 +94,7 @@ const DocumentManagement: React.FC<DocumentManagementProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [organizationId, selectedCategory, searchTerm]);
+  }, [organizationId, selectedCategory, searchTerm, trainingOnly]);
 
   useEffect(() => {
     fetchDocuments();
@@ -145,7 +147,7 @@ const DocumentManagement: React.FC<DocumentManagementProps> = ({
 
   const resetUploadForm = () => {
     setUploadFile(null);
-    setUploadCategory('general');
+    setUploadCategory(trainingOnly ? 'training' : 'general');
     setUploadDescription('');
     setUploadTags('');
   };
@@ -197,10 +199,10 @@ const DocumentManagement: React.FC<DocumentManagementProps> = ({
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
             <HiFolder className="text-blue-500" />
-            Document Management
+            {trainingOnly ? 'Training materials' : 'Document Management'}
           </h1>
           <p className="text-gray-600 dark:text-gray-400 mt-1">
-            Upload and manage organization documents
+            {trainingOnly ? 'Upload and manage materials for training sessions' : 'Upload and manage organization documents'}
           </p>
         </div>
         
@@ -272,11 +274,12 @@ const DocumentManagement: React.FC<DocumentManagementProps> = ({
         <div className="relative">
           <select
             value={selectedCategory}
+            disabled={trainingOnly}
             onChange={(e) => setSelectedCategory(e.target.value)}
             className="appearance-none pl-4 pr-10 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer"
           >
-            <option value="all">All Categories</option>
-            {DEFAULT_DOCUMENT_CATEGORIES.map(cat => (
+            {!trainingOnly && <option value="all">All Categories</option>}
+            {DEFAULT_DOCUMENT_CATEGORIES.filter(cat => !trainingOnly || cat.value === 'training').map(cat => (
               <option key={cat.value} value={cat.value}>{cat.label}</option>
             ))}
           </select>
@@ -426,10 +429,11 @@ const DocumentManagement: React.FC<DocumentManagementProps> = ({
                 </label>
                 <select
                   value={uploadCategory}
+                  disabled={trainingOnly}
                   onChange={(e) => setUploadCategory(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
                 >
-                  {DEFAULT_DOCUMENT_CATEGORIES.map(cat => (
+                  {DEFAULT_DOCUMENT_CATEGORIES.filter(cat => !trainingOnly || cat.value === 'training').map(cat => (
                     <option key={cat.value} value={cat.value}>{cat.label}</option>
                   ))}
                 </select>
@@ -581,7 +585,7 @@ const DocumentManagement: React.FC<DocumentManagementProps> = ({
         <div className="text-sm text-blue-700 dark:text-blue-300">
           <p className="font-medium mb-1">Document Storage</p>
           <p>
-            Documents are stored securely in your organization's folder. Only admins can upload and delete documents.
+            Documents are stored securely in your organization's folder. Authorized managers can upload and delete documents.
             All team members can view and download documents.
           </p>
         </div>

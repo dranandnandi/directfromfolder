@@ -172,6 +172,29 @@ export interface PunchData {
   };
 }
 
+export interface AttendanceCorrectionRequest {
+  id: string;
+  organization_id: string;
+  user_id: string;
+  attendance_date: string;
+  attendance_id: string | null;
+  session_id: string | null;
+  proposed_punch_in: string;
+  proposed_punch_out: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  before_snapshot: {
+    attendance: { id: string; punch_in_time: string | null; punch_out_time: string | null } | null;
+    sessions: Array<{ id: string; punch_in_time: string; punch_out_time: string | null }>;
+  };
+  reviewed_by: string | null;
+  reviewer_name: string | null;
+  decision_note: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  employee?: { name: string; department: string };
+}
+
 export interface AttendanceSummary {
   total_days: number;
   present_days: number;

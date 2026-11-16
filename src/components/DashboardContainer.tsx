@@ -3,9 +3,12 @@ import { Task, TaskType, User } from '../models/task';
 import MyFocusDashboard from './MyFocusDashboard';
 import TaskCreationDashboard from './TaskCreationDashboard';
 import TaskDetailsModal from './TaskDetailsModal';
+import PersonalDashboardOverview, { usePersonalDashboard } from './PersonalDashboardOverview';
 
 interface DashboardContainerProps {
   currentUserId?: string;
+  userRole?: string;
+  initialView?: DashboardView;
   tasks: Task[];
   personalTasks: Task[];
   onAddTask: (type: TaskType) => void;
@@ -18,6 +21,8 @@ type DashboardView = 'focus' | 'creation' | 'all';
 
 const DashboardContainer: React.FC<DashboardContainerProps> = ({
   currentUserId,
+  userRole = 'user',
+  initialView = 'focus',
   tasks,
   personalTasks,
   onAddTask,
@@ -25,8 +30,9 @@ const DashboardContainer: React.FC<DashboardContainerProps> = ({
   onTaskUpdate,
   teamMembers
 }) => {
-  const [currentView, setCurrentView] = useState<DashboardView>('focus');
+  const [currentView, setCurrentView] = useState<DashboardView>(initialView);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const personalOverview = usePersonalDashboard(currentUserId);
 
   const handleSwitchToCreation = () => {
     setCurrentView('creation');
@@ -43,22 +49,25 @@ const DashboardContainer: React.FC<DashboardContainerProps> = ({
   return (
     <>
       <div className="min-h-screen bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {currentView === 'focus' && (
-            <MyFocusDashboard
-              currentUserId={currentUserId}
-              tasks={tasks}
-              personalTasks={personalTasks}
-              onSwitchToCreation={handleSwitchToCreation}
-              onViewAllTasks={handleViewAllTasks}
-              setSelectedTask={setSelectedTask}
-            />
-          )}
+        <div className="max-w-7xl mx-auto py-2 sm:px-2">
+          {currentView === 'focus' && <div className="space-y-8">
+            <PersonalDashboardOverview {...personalOverview} />
+            {personalOverview.data && (
+              <MyFocusDashboard
+                currentUserId={personalOverview.data.employeeId}
+                tasks={tasks}
+                personalTasks={personalTasks}
+                onSwitchToCreation={handleSwitchToCreation}
+                onViewAllTasks={handleViewAllTasks}
+                setSelectedTask={setSelectedTask}
+              />
+            )}
+          </div>}
 
           {(currentView === 'creation' || currentView === 'all') && (
             <TaskCreationDashboard
-              tasks={tasks}
-              personalTasks={personalTasks}
+              tasks={currentView === 'all' && !['admin', 'superadmin'].includes(userRole) ? tasks.filter(task => task.assignees.some(user => user.id === personalOverview.data?.employeeId)) : tasks}
+              personalTasks={currentView === 'all' && !['admin', 'superadmin'].includes(userRole) ? personalTasks.filter(task => task.assignees.some(user => user.id === personalOverview.data?.employeeId)) : personalTasks}
               onAddTask={onAddTask}
               onBackToFocus={handleBackToFocus}
               setSelectedTask={setSelectedTask}

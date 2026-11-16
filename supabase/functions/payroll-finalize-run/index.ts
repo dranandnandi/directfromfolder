@@ -11,6 +11,16 @@ Deno.serve(async (req) => {
     }
 
     const sb = supabaseAdmin();
+    const token = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
+    if (!token) return bad('Sign in to process payroll.', { headers, status: 401 });
+    const { data: auth, error: authError } = await sb.auth.getUser(token);
+    if (authError || !auth.user) return bad('Sign in to process payroll.', { headers, status: 401 });
+    const { data: actor } = await sb.from('users').select('organization_id, role, is_active').eq('auth_id', auth.user.id).maybeSingle();
+    const { data: period } = await sb.from('payroll_periods').select('organization_id').eq('id', payroll_period_id).maybeSingle();
+    if (!actor || actor.is_active === false || !['admin', 'superadmin', 'payroll_admin'].includes(actor.role)
+      || !period || period.organization_id !== actor.organization_id) {
+      return bad('You cannot process payroll for this organization.', { headers, status: 403 });
+    }
     const { data, error } = await sb.rpc("fn_finalize_run", {
       p_period: payroll_period_id,
       p_user: user_id,

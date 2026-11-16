@@ -3,7 +3,7 @@ import { HiClock, HiLocationMarker, HiCamera, HiCheck, HiX, HiExclamationCircle 
 import { AttendanceService } from '../../services/attendanceService';
 import { Attendance, DailyAttendanceStatus, Shift } from '../../models/attendance';
 import { supabase } from '../../utils/supabaseClient';
-import { calculateDistance, formatDistance, parseGeofenceSettings } from '../../utils/geolocation';
+import { formatDistance, parseGeofenceSettings, getGeofenceLocations, getNearestGeofenceDistance, GeofenceLocation, GeofenceSettings } from '../../utils/geolocation';
 
 interface CameraModalProps {
   isOpen: boolean;
@@ -165,12 +165,17 @@ const PunchInOut: React.FC = () => {
   const [punchType, setPunchType] = useState<'in' | 'out'>('in');
   const [userId, setUserId] = useState<string>('');
   const [multiPunchAllowed, setMultiPunchAllowed] = useState(false);
+  const [showQuickOutPrompt, setShowQuickOutPrompt] = useState(false);
+  const [undoing, setUndoing] = useState(false);
 
   // Geofence state
-  const [orgLocation, setOrgLocation] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [distanceFromOrg, setDistanceFromOrg] = useState<number | null>(null);
-  const [geofenceSettings, setGeofenceSettings] = useState<any>(null);
-  const [isOutsideGeofence, setIsOutsideGeofence] = useState(false);
+  const [orgLocations, setOrgLocations] = useState<GeofenceLocation[]>([]);
+  const [geofenceSettings, setGeofenceSettings] = useState<GeofenceSettings | null>(null);
+  const distanceFromOrg = location
+    ? getNearestGeofenceDistance(location.latitude, location.longitude, orgLocations)
+    : null;
+  const isOutsideGeofence = Boolean(geofenceSettings?.enabled && distanceFromOrg !== null &&
+    distanceFromOrg > geofenceSettings.distance_threshold_meters);
 
   useEffect(() => {
     initializeComponent();
@@ -200,11 +205,8 @@ const PunchInOut: React.FC = () => {
         .eq('id', userData.organization_id)
         .single();
 
-      if (orgData?.location_latitude && orgData?.location_longitude) {
-        setOrgLocation({
-          latitude: orgData.location_latitude,
-          longitude: orgData.location_longitude,
-        });
+      if (orgData) {
+        setOrgLocations(getGeofenceLocations(orgData));
         setGeofenceSettings(parseGeofenceSettings(orgData.geofence_settings));
       }
 
@@ -236,22 +238,6 @@ const PunchInOut: React.FC = () => {
       );
       setAddress(addressText);
 
-      // Calculate distance from organization if org location is set
-      if (orgLocation) {
-        const distance = calculateDistance(
-          coords.latitude,
-          coords.longitude,
-          orgLocation.latitude,
-          orgLocation.longitude
-        );
-        setDistanceFromOrg(distance);
-
-        // Check if outside geofence
-        if (geofenceSettings?.enabled) {
-          const isOutside = distance > geofenceSettings.distance_threshold_meters;
-          setIsOutsideGeofence(isOutside);
-        }
-      }
     } catch (error) {
       console.error('Error getting location:', error);
       alert('Please enable location access to punch in/out.');
@@ -272,8 +258,41 @@ const PunchInOut: React.FC = () => {
       alert('Please enable location access first.');
       return;
     }
+    // Punching out right after punching in is usually a slip: ask first.
+    if (canCancelPunchIn) {
+      setShowQuickOutPrompt(true);
+      return;
+    }
     setPunchType('out');
     setShowCamera(true);
+  };
+
+  const confirmPunchOutAnyway = () => {
+    setShowQuickOutPrompt(false);
+    setPunchType('out');
+    setShowCamera(true);
+  };
+
+  const handleUndoPunch = async (kind: 'in' | 'out' | 'discard', alreadyConfirmed = false) => {
+    const message = kind === 'out'
+      ? 'Undo your punch-out? You will stay checked in.'
+      : kind === 'discard'
+        ? 'Discard this short punch? It will be removed from today.'
+        : 'Cancel this punch-in? It will be removed from today.';
+    if (!alreadyConfirmed && !window.confirm(message)) return;
+
+    setShowQuickOutPrompt(false);
+    setUndoing(true);
+    try {
+      await AttendanceService.undoMyPunch(kind);
+      const refreshed = await AttendanceService.getTodayOrActiveAttendance(userId);
+      setTodayAttendance(refreshed || null);
+    } catch (error: any) {
+      console.error('Error undoing punch:', error);
+      alert(error.message || 'Could not undo the punch. Please contact your administrator.');
+    } finally {
+      setUndoing(false);
+    }
   };
 
   const handleSelfieCapture = async (file: File) => {
@@ -281,10 +300,17 @@ const PunchInOut: React.FC = () => {
 
     setLoading(true);
     try {
+      // Recheck GPS at submission rather than using the position captured on page load.
+      const currentLocation = await AttendanceService.getCurrentLocation();
+      setLocation(currentLocation);
+      const currentAddress = await AttendanceService.getAddressFromCoordinates(
+        currentLocation.latitude, currentLocation.longitude
+      );
+      setAddress(currentAddress);
       const punchData = {
-        latitude: location.latitude,
-        longitude: location.longitude,
-        address: address,
+        latitude: currentLocation.latitude,
+        longitude: currentLocation.longitude,
+        address: currentAddress,
         selfie_file: file,
         device_info: {
           user_agent: navigator.userAgent,
@@ -415,6 +441,20 @@ const PunchInOut: React.FC = () => {
     );
   };
 
+  // Mistake window: employees may undo their own latest punch for a few minutes.
+  const undoWindowMs = AttendanceService.PUNCH_UNDO_WINDOW_MINUTES * 60 * 1000;
+  const openSession = sessions.find(s => !s.punch_out_time);
+  const openPunchInTime = openSession?.punch_in_time ?? (status.status === 'punched_in' ? status.punch_in_time : undefined);
+  const canCancelPunchIn = status.status === 'punched_in' && !!openPunchInTime &&
+    currentTime.getTime() - new Date(openPunchInTime).getTime() <= undoWindowMs;
+  // Latest closed session: a short one (punch-in to punch-out) is a mistake.
+  const lastClosed = [...sessions].reverse().find(s => s.punch_out_time);
+  const lastInTime = lastClosed?.punch_in_time ?? status.punch_in_time;
+  const lastOutTime = lastClosed?.punch_out_time ?? status.punch_out_time;
+  const canUndoShortPunch = status.status === 'punched_out' && !!lastInTime && !!lastOutTime &&
+    new Date(lastOutTime).getTime() - new Date(lastInTime).getTime() <= undoWindowMs &&
+    currentTime.getTime() - new Date(lastOutTime).getTime() <= AttendanceService.PUNCH_UNDO_LOOKBACK_HOURS * 3600 * 1000;
+
   const punchBlockedByGeofence = Boolean(
     geofenceSettings?.enabled && geofenceSettings?.enforcement_mode === 'strict' && isOutsideGeofence
   );
@@ -453,20 +493,19 @@ const PunchInOut: React.FC = () => {
             </div>
             {location && distanceFromOrg !== null && (
               <div className="text-sm mt-1">
-                Distance from office: <span className={`font-medium ${isOutsideGeofence ? 'text-orange-600' : 'text-green-600'}`}>
+                Nearest allowed location: <span className={`font-medium ${isOutsideGeofence ? 'text-orange-600' : 'text-green-600'}`}>
                   {formatDistance(distanceFromOrg)}
                 </span>
               </div>
             )}
           </div>
-          {!location && (
-            <button
-              onClick={getCurrentLocation}
-              className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-            >
-              Enable
-            </button>
-          )}
+          <button
+            onClick={getCurrentLocation}
+            disabled={loading}
+            className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+          >
+            {location ? 'Refresh location' : 'Enable location'}
+          </button>
         </div>
         
         {/* Geofence Warning */}
@@ -497,7 +536,7 @@ const PunchInOut: React.FC = () => {
                     ? 'text-red-700' 
                     : 'text-orange-700'
                 }`}>
-                  You are {formatDistance(distanceFromOrg!)} from office. 
+                  You are {formatDistance(distanceFromOrg!)} from the nearest allowed location.{' '}
                   {geofenceSettings.enforcement_mode === 'strict' 
                     ? ` Maximum allowed: ${formatDistance(geofenceSettings.distance_threshold_meters)}. Please move closer or contact admin.`
                     : ` Attendance will be marked as outside geofence for review.`}
@@ -565,6 +604,15 @@ const PunchInOut: React.FC = () => {
               <p className="text-xs text-red-600 text-center">
                 Punch out blocked due to geofence policy. Move closer to office or contact admin.
               </p>
+            )}
+            {canCancelPunchIn && (
+              <button
+                onClick={() => handleUndoPunch('in')}
+                disabled={undoing || loading}
+                className="w-full text-sm text-gray-600 underline hover:text-gray-900 disabled:opacity-50"
+              >
+                {undoing ? 'Cancelling...' : 'Punched in by mistake? Cancel punch-in'}
+              </button>
             )}
           </div>
         )}
@@ -651,6 +699,27 @@ const PunchInOut: React.FC = () => {
               </div>
             </div>
             {renderSessions()}
+            {canUndoShortPunch && (
+              <div className="pt-3 border-t space-y-2">
+                <button
+                  onClick={() => handleUndoPunch('out')}
+                  disabled={undoing || loading}
+                  className="w-full py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {undoing ? 'Working...' : 'Undo punch-out (stay checked in)'}
+                </button>
+                <button
+                  onClick={() => handleUndoPunch('discard')}
+                  disabled={undoing || loading}
+                  className="w-full py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Discard this punch
+                </button>
+                <p className="text-xs text-gray-500 text-center">
+                  This session lasted {AttendanceService.PUNCH_UNDO_WINDOW_MINUTES} minutes or less, so you can fix it yourself.
+                </p>
+              </div>
+            )}
             {multiPunchAllowed && (
               <div className="pt-3 border-t">
                 <button
@@ -690,6 +759,39 @@ const PunchInOut: React.FC = () => {
                   Weekly Off: {(todayAttendance as any).shift_weekly_off_days.map((d: string) => d.slice(0, 3)).join(', ')}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showQuickOutPrompt && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-5 w-full max-w-sm space-y-4">
+            <h3 className="text-lg font-semibold">You just punched in</h3>
+            <p className="text-sm text-gray-600">
+              You punched in {Math.max(1, Math.round((currentTime.getTime() - new Date(openPunchInTime || currentTime).getTime()) / 60000))} min ago.
+              If that was a mistake, cancel the punch-in instead of punching out.
+            </p>
+            <div className="space-y-2">
+              <button
+                onClick={() => handleUndoPunch('in', true)}
+                disabled={undoing}
+                className="w-full py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 disabled:opacity-50"
+              >
+                Cancel my punch-in
+              </button>
+              <button
+                onClick={confirmPunchOutAnyway}
+                className="w-full py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+              >
+                Punch out anyway
+              </button>
+              <button
+                onClick={() => setShowQuickOutPrompt(false)}
+                className="w-full py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              >
+                Keep working
+              </button>
             </div>
           </div>
         </div>

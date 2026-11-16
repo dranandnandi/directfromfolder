@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { HiClock, HiExclamationCircle, HiClipboardList, HiArrowRight } from 'react-icons/hi';
-import { Task, TaskType, TaskStatus } from '../models/task';
+import { Task, TaskType, TaskStatus, TaskPriority } from '../models/task';
 import clsx from 'clsx';
 import { FaWhatsapp } from 'react-icons/fa';
 import { generateWhatsAppMessage } from '../utils/aiUtils';
@@ -15,8 +15,8 @@ interface MyFocusDashboardProps {
 }
 
 const SummaryCard = ({ icon: Icon, title, value, color, subtitle, onClick }: any) => (
-  <div 
-    className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200 cursor-pointer hover:border-blue-300 transform hover:scale-105"
+  <button type="button"
+    className="w-full text-left bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200 cursor-pointer hover:border-blue-300"
     onClick={onClick}
   >
     <div className="flex items-center justify-between">
@@ -29,7 +29,7 @@ const SummaryCard = ({ icon: Icon, title, value, color, subtitle, onClick }: any
         {subtitle && <p className="text-xs text-gray-500 mt-1">{subtitle}</p>}
       </div>
     </div>
-  </div>
+  </button>
 );
 
 // Helper function for WhatsApp
@@ -49,14 +49,21 @@ const MyFocusDashboard: React.FC<MyFocusDashboardProps> = ({
   onViewAllTasks,
   setSelectedTask
 }) => {
-  // Combine all tasks
-  const allTasks = useMemo(() => [...tasks, ...personalTasks], [tasks, personalTasks]);
+  // The home focus is personal, including for administrators. Leave requests
+  // have their own overview and should not appear again as urgent tasks.
+  const allTasks = useMemo(() => {
+    if (!currentUserId) return [];
+    return [...new Map([...tasks, ...personalTasks].map(task => [task.id, task])).values()]
+      .filter(task => task.assignees?.some(assignee => assignee.id === currentUserId))
+      .filter(task => !(task.type === TaskType.PersonalTask &&
+        (/Leave Request/i.test(task.title) || /LEAVE REQUEST DETAILS/i.test(task.description || ''))));
+  }, [tasks, personalTasks, currentUserId]);
 
   // Filter tasks assigned to current user
   const myAssignedTasks = useMemo(() => {
     if (!currentUserId) return [];
     return allTasks.filter(task => 
-      task.assignees?.some(assignee => assignee.id === currentUserId)
+      task.assignees?.some(assignee => assignee.id === currentUserId) && task.status !== TaskStatus.Completed
     );
   }, [allTasks, currentUserId]);
 
@@ -128,10 +135,9 @@ const MyFocusDashboard: React.FC<MyFocusDashboardProps> = ({
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'Critical': return 'border-l-red-500 bg-red-50';
-      case 'High': return 'border-l-orange-500 bg-orange-50';
-      case 'Moderate': return 'border-l-yellow-500 bg-yellow-50';
-      case 'Low': return 'border-l-green-500 bg-green-50';
+      case TaskPriority.Critical: return 'border-l-red-500 bg-red-50';
+      case TaskPriority.Moderate: return 'border-l-yellow-500 bg-yellow-50';
+      case TaskPriority.LessImportant: return 'border-l-green-500 bg-green-50';
       default: return 'border-l-gray-500 bg-gray-50';
     }
   };
@@ -189,7 +195,7 @@ const MyFocusDashboard: React.FC<MyFocusDashboardProps> = ({
   const renderTaskSection = (tasks: Task[], title: string, emoji: string, emptyMessage: string) => {
     if (tasks.length === 0) {
       return (
-        <div className="bg-gray-50 rounded-lg p-6 text-center">
+        <div id={title.toLowerCase().replace(/\s+/g, '-')} className="scroll-mt-24 bg-gray-50 rounded-lg p-6 text-center">
           <div className="text-gray-400 text-4xl mb-2">{emoji}</div>
           <p className="text-gray-500 text-sm">{emptyMessage}</p>
         </div>
@@ -197,14 +203,15 @@ const MyFocusDashboard: React.FC<MyFocusDashboardProps> = ({
     }
 
     return (
-      <div>
+      <div id={title.toLowerCase().replace(/\s+/g, '-')} className="scroll-mt-24">
         <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
           <span className="text-xl">{emoji}</span>
           {title} ({tasks.length})
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {tasks.map(renderTaskCard)}
+          {[...tasks].sort((a, b) => (Number(b.priority === TaskPriority.Critical) - Number(a.priority === TaskPriority.Critical)) || (a.dueDate ? new Date(a.dueDate).getTime() : Infinity) - (b.dueDate ? new Date(b.dueDate).getTime() : Infinity)).slice(0, 3).map(renderTaskCard)}
         </div>
+        {tasks.length > 3 && <button onClick={onViewAllTasks} className="mt-3 text-sm font-medium text-blue-700">View all {tasks.length} tasks →</button>}
       </div>
     );
   };
@@ -212,12 +219,12 @@ const MyFocusDashboard: React.FC<MyFocusDashboardProps> = ({
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">📊 My Focus</h1>
-          <p className="text-gray-600">Your most important tasks at a glance</p>
+          <h2 className="text-xl font-bold text-gray-900">My tasks</h2>
+          <p className="text-sm text-gray-600">Your assigned tasks and upcoming deadlines</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <button
             onClick={onSwitchToCreation}
             className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 transition-colors"
@@ -243,6 +250,7 @@ const MyFocusDashboard: React.FC<MyFocusDashboardProps> = ({
           value={taskCategories.overdue.length}
           color="bg-red-500"
           subtitle="Need immediate attention"
+          onClick={() => document.getElementById('urgent-tasks')?.scrollIntoView({ behavior: 'smooth' })}
         />
         <SummaryCard
           icon={HiClock}
@@ -250,13 +258,15 @@ const MyFocusDashboard: React.FC<MyFocusDashboardProps> = ({
           value={taskCategories.dueToday.length}
           color="bg-orange-500"
           subtitle="Upcoming deadlines"
+          onClick={() => document.getElementById('due-soon')?.scrollIntoView({ behavior: 'smooth' })}
         />
         <SummaryCard
           icon={HiClipboardList}
-          title="My Assigned Tasks"
+          title="My Open Tasks"
           value={taskCategories.myAssigned.length}
           color="bg-blue-500"
           subtitle="Tasks assigned to you"
+          onClick={() => document.getElementById('my-open-tasks')?.scrollIntoView({ behavior: 'smooth' })}
         />
       </div>
 
@@ -281,7 +291,7 @@ const MyFocusDashboard: React.FC<MyFocusDashboardProps> = ({
         {/* My Assigned Tasks */}
         {renderTaskSection(
           taskCategories.myAssigned,
-          "My Assigned Tasks",
+          "My Open Tasks",
           "📋",
           "No tasks assigned to you yet"
         )}

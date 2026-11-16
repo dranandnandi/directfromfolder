@@ -6,6 +6,9 @@ import { useOrganization } from "../contexts/OrganizationContext";
 import { AsyncSection, EmptyState, PageHeader } from "./widgets/Primitives";
 import { StatCard } from "./ui/StatCard";
 import { StatusBadge } from "./ui/StatusBadge";
+import { usePayrollReadiness } from '../hooks/usePayrollReadiness';
+import { staffWorkflowService } from '../services/staffWorkflowService';
+import PayrollReadinessPanel from './widgets/PayrollReadinessPanel';
 
 /** ===== Types ===== */
 type PeriodStatus = "draft" | "locked" | "posted" | "challan_generated";
@@ -79,11 +82,13 @@ type ActionKey =
 export default function PayrollAdminHome() {
   const { month, year } = useContext(PayrollContext);
   const { organizationId } = useOrganization();
+  const readiness = usePayrollReadiness(organizationId, month, year);
 
   const [summary, setSummary] = useState<AdminHomeSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<ActionKey | "">("");
+  const [actionError, setActionError] = useState('');
 
   async function load() {
     setLoading(true);
@@ -176,7 +181,12 @@ export default function PayrollAdminHome() {
   async function runAction(key: ActionKey) {
     if (!organizationId) return;
     setBusy(key);
+    setActionError('');
     try {
+      if (['finalize_all', 'lock_period', 'post_period'].includes(key)) {
+        const check = await staffWorkflowService.readiness(organizationId, month, year, key === 'post_period');
+        if (!check.ready) throw new Error(check.groups.filter(group => group.blocking).map(group => `${group.label} (${group.count})`).join(', '));
+      }
       if (key === "bootstrap") {
         await supabase.from('payroll_periods').insert({
           organization_id: organizationId,
@@ -184,23 +194,23 @@ export default function PayrollAdminHome() {
           year,
           status: 'draft',
           created_at: new Date().toISOString()
-        });
+        }).throwOnError();
       } else if (key === "recalc_all") {
         alert("Recalculate all feature needs to be implemented with proper payroll calculation logic");
       } else if (key === "finalize_all" && periodId) {
-        await supabase.from('payroll_runs').update({ status: 'finalized' }).eq('payroll_period_id', periodId);
+        await supabase.from('payroll_runs').update({ status: 'finalized' }).eq('payroll_period_id', periodId).throwOnError();
       } else if (key === "unfinalize_all" && periodId) {
-        await supabase.from('payroll_runs').update({ status: 'processed' }).eq('payroll_period_id', periodId);
+        await supabase.from('payroll_runs').update({ status: 'processed' }).eq('payroll_period_id', periodId).throwOnError();
       } else if (key === "lock_period" && periodId) {
-        await supabase.from('payroll_periods').update({ status: 'locked', lock_at: new Date().toISOString() }).eq('id', periodId);
+        await supabase.from('payroll_periods').update({ status: 'locked', lock_at: new Date().toISOString() }).eq('id', periodId).throwOnError();
       } else if (key === "reopen_period" && periodId) {
-        await supabase.from('payroll_periods').update({ status: 'draft', lock_at: null }).eq('id', periodId);
+        await supabase.from('payroll_periods').update({ status: 'draft', lock_at: null }).eq('id', periodId).throwOnError();
       } else if (key === "post_period" && periodId) {
-        await supabase.from('payroll_periods').update({ status: 'posted' }).eq('id', periodId);
+        await supabase.from('payroll_periods').update({ status: 'posted' }).eq('id', periodId).throwOnError();
       }
-      await load();
+      await load(); readiness.refresh();
     } catch (e: any) {
-      alert(e?.message || "Action failed");
+      setActionError(e?.message || 'Action failed'); readiness.refresh();
     } finally {
       setBusy("");
     }
@@ -208,6 +218,8 @@ export default function PayrollAdminHome() {
 
   return (
     <div className="space-y-8">
+      <PayrollReadinessPanel {...readiness} onRefresh={readiness.refresh} />
+      {actionError && <p role="alert" className="rounded-lg bg-red-50 p-4 text-sm text-red-700">{actionError}</p>}
       <div className="flex justify-between items-start">
         <PageHeader
           title="Payroll Dashboard"
@@ -220,7 +232,7 @@ export default function PayrollAdminHome() {
             {summary.period.status === 'draft' && (
               <button
                 onClick={() => runAction("lock_period")}
-                disabled={!!busy}
+                disabled={!!busy || readiness.loading || !readiness.data?.ready}
                 className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded hover:bg-blue-100 font-medium"
               >
                 Lock Period
@@ -229,7 +241,7 @@ export default function PayrollAdminHome() {
             {summary.period.status === 'locked' && (
               <button
                 onClick={() => runAction("post_period")}
-                disabled={!!busy}
+                disabled={!!busy || readiness.loading || !readiness.data?.ready}
                 className="text-xs bg-green-50 text-green-700 px-3 py-1.5 rounded hover:bg-green-100 font-medium"
               >
                 Post Period
@@ -259,7 +271,7 @@ export default function PayrollAdminHome() {
             <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <StatCard
                 label="Total Employees"
-                value={summary.runs.total_users}
+                value={readiness.data?.employee_count ?? summary.runs.total_users}
                 sub={`${summary.runs.processed} processed`}
                 icon={<span className="text-xl">👥</span>}
               />
@@ -315,12 +327,12 @@ export default function PayrollAdminHome() {
                   <div className="space-y-3">
                     <HealthItem
                       label="Employees missing compensation"
-                      count={summary.health.missing_compensation}
+                      count={readiness.data?.groups.find(group => group.code === 'missing_compensation')?.count ?? summary.health.missing_compensation}
                       to="/payroll/compensation"
                     />
                     <HealthItem
                       label="Pending overrides"
-                      count={summary.health.overrides_pending}
+                      count={readiness.data?.groups.find(group => group.code === 'pending_overrides')?.count ?? summary.health.overrides_pending}
                       to="/payroll/import/overrides"
                     />
                     <HealthItem

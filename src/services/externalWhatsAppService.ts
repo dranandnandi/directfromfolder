@@ -1,3 +1,4 @@
+import { supabase } from '../utils/supabaseClient';
 export type ExternalWhatsAppStatus =
   | 'not_configured'
   | 'checking'
@@ -39,90 +40,30 @@ export interface ExternalWhatsAppAdminUser {
   role: string;
 }
 
-const configuredBaseUrl = (import.meta.env.VITE_EXTERNAL_WA_API_URL || '').replace(/\/+$/, '');
-const configuredApiKey = import.meta.env.VITE_EXTERNAL_WA_API_KEY || '';
 
-function assertConfigured() {
-  if (!configuredBaseUrl || !configuredApiKey) {
-    throw new Error('External WhatsApp API is not configured');
-  }
-}
-
-async function requestExternal<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
-  assertConfigured();
-
-  const response = await fetch(`${configuredBaseUrl}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': configuredApiKey,
-      ...(options.headers || {}),
-    },
+async function requestExternal<T>(action: string, userId?: string, sessionName?: string): Promise<T> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Please sign in to Task Manager.');
+  const { data, error } = await supabase.functions.invoke('workforce-whatsapp', {
+    body: { action, ...(userId ? { user_id: userId } : {}), ...(sessionName ? { session_name: sessionName } : {}) },
   });
-
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || payload?.success === false) {
-    const message = payload?.error || `External WhatsApp API failed (${response.status})`;
-    const error = new Error(message);
-    (error as any).status = response.status;
-    throw error;
+  if (error) {
+    const response = (error as { context?: Response }).context;
+    const details = response instanceof Response ? await response.json().catch(() => null) : null;
+    const failure = new Error(details?.error || 'WhatsApp server connection is unavailable.');
+    Object.assign(failure, { status: response?.status });
+    throw failure;
   }
-
-  return payload?.data as T;
+  if (data?.success !== true) throw new Error(data?.error || 'WhatsApp operation failed.');
+  return data.data as T;
 }
-
 export const externalWhatsAppService = {
-  isConfigured: Boolean(configuredBaseUrl && configuredApiKey),
-
-  async handshake(userId: string) {
-    return requestExternal<{ userId: string; existed: boolean }>('/api/external/users/sync', {
-      method: 'POST',
-      body: JSON.stringify({ id: userId }),
-    });
-  },
-
-  async syncAdmins(organizationId: string, admins: ExternalWhatsAppAdminUser[]) {
-    return requestExternal<{
-      organizationId: string;
-      received: number;
-      synced: number;
-      users: Array<{ id: string; username: string; role: string }>;
-    }>('/api/external/users/sync-admins', {
-      method: 'POST',
-      body: JSON.stringify({ organizationId, admins }),
-    });
-  },
-
-  async connect(userId: string, sessionName = 'default') {
-    return requestExternal<ExternalWhatsAppQrPayload>(`/api/users/${encodeURIComponent(userId)}/whatsapp/connect`, {
-      method: 'POST',
-      body: JSON.stringify({ sessionName }),
-    });
-  },
-
-  async refreshQr(userId: string, sessionName = 'default') {
-    return requestExternal<ExternalWhatsAppQrPayload>(`/api/users/${encodeURIComponent(userId)}/whatsapp/refresh-qr`, {
-      method: 'POST',
-      body: JSON.stringify({ sessionName }),
-    });
-  },
-
-  async getQr(userId: string, sessionName = 'default') {
-    const query = new URLSearchParams({ sessionName });
-    return requestExternal<ExternalWhatsAppQrPayload>(`/api/users/${encodeURIComponent(userId)}/whatsapp/qr?${query.toString()}`);
-  },
-
-  async getStatus(userId: string) {
-    return requestExternal<ExternalWhatsAppStatusPayload>(`/api/users/${encodeURIComponent(userId)}/whatsapp/status`);
-  },
-
-  async disconnect(userId: string, sessionName = 'default') {
-    return requestExternal<{ status: string; sessionName: string }>('/api/external/sessions/disconnect', {
-      method: 'POST',
-      body: JSON.stringify({ userId, sessionName }),
-    });
-  },
+  isConfigured: Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY),
+  handshake: (userId: string) => requestExternal<{ userId: string; existed: boolean }>('handshake', userId),
+  syncAdmins: () => requestExternal<{ organizationId: string; received: number; synced: number; users: Array<{ id: string; username: string; role: string }> }>('sync_admins'),
+  connect: (userId: string, sessionName = 'default') => requestExternal<ExternalWhatsAppQrPayload>('connect', userId, sessionName),
+  refreshQr: (userId: string, sessionName = 'default') => requestExternal<ExternalWhatsAppQrPayload>('refresh_qr', userId, sessionName),
+  getQr: (userId: string, sessionName = 'default') => requestExternal<ExternalWhatsAppQrPayload>('qr', userId, sessionName),
+  getStatus: (userId: string) => requestExternal<ExternalWhatsAppStatusPayload>('status', userId),
+  disconnect: (userId: string, sessionName = 'default') => requestExternal<{ status: string; sessionName: string }>('disconnect', userId, sessionName),
 };

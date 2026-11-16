@@ -21,6 +21,10 @@ export interface LeavePolicy {
   /** 1-12. 4 = April-to-March (Indian financial year), 1 = calendar year. */
   year_start_month: number;
   types: LeaveTypeConfig[];
+  /** Leave calendar: 0 = Sunday, 6 = Saturday. Empty preserves calendar-day counting. */
+  excluded_weekdays?: number[];
+  /** Holidays excluded from leave consumption, in YYYY-MM-DD format. */
+  excluded_dates?: string[];
 }
 
 export const DEFAULT_LEAVE_POLICY: LeavePolicy = {
@@ -60,6 +64,10 @@ export const parseLeavePolicy = (raw: unknown): LeavePolicy => {
 
   return {
     year_start_month,
+    excluded_weekdays: Array.isArray(source.excluded_weekdays)
+      ? [...new Set(source.excluded_weekdays.filter(day => Number.isInteger(day) && day >= 0 && day <= 6))] : [],
+    excluded_dates: Array.isArray(source.excluded_dates)
+      ? [...new Set(source.excluded_dates.filter(date => typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)))] : [],
     types: types.length > 0 ? types : DEFAULT_LEAVE_POLICY.types.map(t => ({ ...t }))
   };
 };
@@ -79,7 +87,8 @@ export const findLeaveType = (policy: LeavePolicy, value?: string | null) => {
 const toUtcDate = (ymd: string) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(ymd);
   if (!m) return null;
-  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  const date = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return date.toISOString().slice(0, 10) === m[0] ? date : null;
 };
 
 const formatYmd = (d: Date) => d.toISOString().slice(0, 10);
@@ -96,8 +105,9 @@ export interface LeaveYear {
 /** The leave year that contains `on` (defaults to today). */
 export const getLeaveYear = (policy: LeavePolicy, on: Date = new Date()): LeaveYear => {
   const startMonth = policy.year_start_month;
-  const year = on.getUTCFullYear();
-  const month = on.getUTCMonth() + 1;
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', year: 'numeric', month: 'numeric' }).formatToParts(on);
+  const year = Number(parts.find(part => part.type === 'year')?.value);
+  const month = Number(parts.find(part => part.type === 'month')?.value);
   const startYear = month >= startMonth ? year : year - 1;
 
   const start = new Date(Date.UTC(startYear, startMonth - 1, 1));
@@ -121,20 +131,29 @@ export interface LeaveRequestLike {
   status: string;              // approved | pending | rejected
 }
 
-/**
- * Days a request consumes. Full-day requests count every calendar day from
- * start to end inclusive; half day is 0.5; early departure does not consume
- * leave. Weekends and holidays are not excluded - that is a phase-2 refinement.
- */
-export const leaveDaysForRequest = (request: Pick<LeaveRequestLike, 'leave_type' | 'start_date' | 'end_date'>) => {
-  if (request.leave_type === 'half_day') return 0.5;
+/** Count the configured working days, optionally clipped to a leave year. */
+export const leaveDaysForRequest = (
+  request: Pick<LeaveRequestLike, 'leave_type' | 'start_date' | 'end_date'>,
+  policy?: LeavePolicy,
+  leaveYear?: LeaveYear
+) => {
   if (request.leave_type === 'early_departure') return 0;
 
   const start = toUtcDate(request.start_date);
   const end = request.end_date ? toUtcDate(request.end_date) : start;
-  if (!start || !end || end < start) return 1;
+  if (!start || !end || end < start) return 0;
+  const excludedDates = new Set(policy?.excluded_dates || []);
+  let days = 0;
+  // A half-day belongs only to its start date, even for malformed historical ranges.
+  const last = request.leave_type === 'half_day' ? start : end;
+  for (const date = new Date(start); date <= last; date.setUTCDate(date.getUTCDate() + 1)) {
+    const ymd = formatYmd(date);
+    if (leaveYear && (ymd < leaveYear.start || ymd >= leaveYear.end)) continue;
+    if (policy?.excluded_weekdays?.includes(date.getUTCDay()) || excludedDates.has(ymd)) continue;
+    days += request.leave_type === 'half_day' ? 0.5 : 1;
+  }
 
-  return Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
+  return days;
 };
 
 export interface LeaveBalance extends LeaveTypeConfig {
@@ -147,9 +166,8 @@ export interface LeaveBalance extends LeaveTypeConfig {
 }
 
 /**
- * Balance per configured leave type, counting only requests whose start date
- * falls inside the given leave year. Requests without a category (created
- * before categories existed) are ignored.
+ * Allocate only the portion of each request inside the given leave year.
+ * Requests without a category (created before categories existed) are ignored.
  */
 export const computeLeaveBalances = (
   policy: LeavePolicy,
@@ -161,10 +179,7 @@ export const computeLeaveBalances = (
   for (const request of requests) {
     const code = request.leave_category ? normaliseLeaveCode(request.leave_category) : '';
     if (!code) continue;
-    const start = request.start_date?.slice(0, 10);
-    if (!start || start < leaveYear.start || start >= leaveYear.end) continue;
-
-    const days = leaveDaysForRequest(request);
+    const days = leaveDaysForRequest(request, policy, leaveYear);
     const entry = totals.get(code) ?? { used: 0, pending: 0 };
     if (request.status === 'approved') entry.used += days;
     else if (request.status === 'pending') entry.pending += days;

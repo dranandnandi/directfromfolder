@@ -56,27 +56,8 @@ export default function WhatsAppConnection() {
 
   const syncOrganizationAdmins = async (profile: TaskManagerUser) => {
     if (!externalWhatsAppService.isConfigured || !ADMIN_ROLES.has(profile.role)) return;
-
-    const { data: admins, error } = await supabase
-      .from('users')
-      .select('id, name, email, role, is_active')
-      .eq('organization_id', profile.organization_id)
-      .in('role', ['admin', 'superadmin'])
-      .eq('is_active', true);
-
-    if (error) throw error;
-
-    const result = await externalWhatsAppService.syncAdmins(
-      profile.organization_id,
-      (admins || []).map((admin: any) => ({
-        id: admin.id,
-        name: admin.name,
-        email: admin.email,
-        role: admin.role,
-      })),
-    );
-
-    setMessage(`Synced ${result.synced} admin user${result.synced === 1 ? '' : 's'} for this organization.`);
+    const result = await externalWhatsAppService.syncAdmins();
+    setMessage(`Synced ${result.synced} admin users for this organization.`);
   };
 
   useEffect(() => {
@@ -204,7 +185,7 @@ export default function WhatsAppConnection() {
             <h2 className="text-lg font-semibold">External WhatsApp API not configured</h2>
           </div>
           <p className="mt-2 text-sm text-gray-600">
-            Add VITE_EXTERNAL_WA_API_URL and VITE_EXTERNAL_WA_API_KEY to the app environment.
+            Your Task Manager server connection is not configured. Contact your administrator.
           </p>
         </div>
       </section>
@@ -253,7 +234,7 @@ export default function WhatsAppConnection() {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,360px)_1fr]">
         <div className="bg-white border border-gray-200 rounded-lg p-4 space-y-4">
           <label className="block">
-            <span className="text-sm font-medium text-gray-700">External user ID</span>
+            <span className="text-sm font-medium text-gray-700">Task administrator ID</span>
             <input
               value={externalUserId}
               onChange={(event) => setExternalUserId(event.target.value)}

@@ -90,8 +90,8 @@ export default function PayrollSettings() {
 
   // editor state
   const [editing, setEditing] = useState<PayComponent | null>(null);
-  const [jsonBank, setJsonBank] = useState<string>("");
-  const [jsonChallan, setJsonChallan] = useState<string>("");
+  const [bankDetails, setBankDetails] = useState<Record<string, any>>({});
+  const [challanPrefs, setChallanPrefs] = useState<Record<string, any>>({});
 
   // profile form
   const [profile, setProfile] = useState<OrgStatProfile | null>(null);
@@ -134,8 +134,8 @@ export default function PayrollSettings() {
 
       setData(res);
       setProfile(res.org_profile);
-      setJsonBank(JSON.stringify(res.org_profile?.bank_details ?? {}, null, 2));
-      setJsonChallan(JSON.stringify(res.org_profile?.challan_prefs ?? {}, null, 2));
+      setBankDetails(res.org_profile?.bank_details ?? {});
+      setChallanPrefs(res.org_profile?.challan_prefs ?? {});
     } catch (e: any) {
       setErr(e?.message || "Failed to load settings");
     } finally {
@@ -355,17 +355,6 @@ export default function PayrollSettings() {
   // ---- profile actions ----
   async function saveProfile() {
     if (!profile) return;
-    let bank: any, challan: any;
-    try {
-      bank = jsonBank.trim() ? JSON.parse(jsonBank) : {};
-    } catch {
-      return alert("bank_details JSON is invalid");
-    }
-    try {
-      challan = jsonChallan.trim() ? JSON.parse(jsonChallan) : {};
-    } catch {
-      return alert("challan_prefs JSON is invalid");
-    }
     setSavingProfile(true);
     try {
       const profileData = {
@@ -375,8 +364,8 @@ export default function PayrollSettings() {
         pt_state: profile.pt_state,
         tan: profile.tan,
         pan: profile.pan,
-        bank_details: bank,
-        challan_prefs: challan,
+        bank_details: bankDetails,
+        challan_prefs: challanPrefs,
       };
 
       // Use upsert to create or update the profile
@@ -684,27 +673,20 @@ export default function PayrollSettings() {
 
                     <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Bank Details (JSON)</label>
-                        <textarea
-                          rows={10}
-                          value={jsonBank}
-                          onChange={(e) => setJsonBank(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                        <div className="text-xs text-gray-500 mt-1">
-                          Example: {"{ \"bank_name\": \"HDFC\", \"account_no\": \"xxxx\", \"ifsc\": \"HDFC0000\" }"}
+                        <h3 className="mb-3 font-medium text-gray-900">Bank details</h3>
+                        <div className="space-y-3">
+                          <TextField label="Bank name" value={bankDetails.bank_name || ''} onChange={value => setBankDetails(current => ({ ...current, bank_name: value }))} />
+                          <TextField label="Account holder" value={bankDetails.account_holder || ''} onChange={value => setBankDetails(current => ({ ...current, account_holder: value }))} />
+                          <TextField label="Account number" value={bankDetails.account_no || ''} onChange={value => setBankDetails(current => ({ ...current, account_no: value }))} />
+                          <TextField label="IFSC" value={bankDetails.ifsc || ''} onChange={value => setBankDetails(current => ({ ...current, ifsc: value.toUpperCase() }))} />
                         </div>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Challan Prefs (JSON)</label>
-                        <textarea
-                          rows={10}
-                          value={jsonChallan}
-                          onChange={(e) => setJsonChallan(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                        <div className="text-xs text-gray-500 mt-1">
-                          Example: {"{ \"pf_payment_mode\": \"netbanking\", \"esic_payment_mode\": \"netbanking\" }"}
+                        <h3 className="mb-3 font-medium text-gray-900">Payment preferences</h3>
+                        <div className="space-y-3">
+                          <TextField label="PF payment method" value={challanPrefs.pf_payment_mode || ''} onChange={value => setChallanPrefs(current => ({ ...current, pf_payment_mode: value }))} />
+                          <TextField label="ESIC payment method" value={challanPrefs.esic_payment_mode || ''} onChange={value => setChallanPrefs(current => ({ ...current, esic_payment_mode: value }))} />
+                          <p className="text-xs text-gray-500">For example, netbanking or cheque. Existing additional settings are preserved when you save.</p>
                         </div>
                       </div>
                     </div>

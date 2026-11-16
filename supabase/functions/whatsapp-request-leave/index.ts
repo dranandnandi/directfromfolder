@@ -137,21 +137,17 @@ serve(async (req) => {
       leaveYear
     );
     const balance = balances.find(b => b.code === category.code)!;
-    const requestedDays = leaveDaysForRequest({ leave_type: leaveType, start_date: startDate, end_date: endDate });
-    const exceedsQuota = balance.annual_quota > 0 && requestedDays > balance.remaining;
+    const requestedDays = leaveDaysForRequest({ leave_type: leaveType, start_date: startDate, end_date: endDate }, policy);
+    const currentYearDays = leaveDaysForRequest({ leave_type: leaveType, start_date: startDate, end_date: endDate }, policy, leaveYear);
+    const exceedsQuota = balance.annual_quota > 0 && currentYearDays > balance.remaining;
 
     console.log('Leave category:', category.code, 'balance:', formatBalance(balance), 'requested:', requestedDays);
 
     // Find admin for this organization
-    const { data: adminData, error: adminError } = await supabaseAdmin
-      .from('users')
-      .select('id, name')
-      .eq('organization_id', organizationId)
-      .in('role', ['admin', 'superadmin'])
-      .limit(1);
+    const { data: adminData, error: adminError } = await supabaseAdmin.rpc('fn_service_leave_approvers', { p_user: userId });
 
     if (adminError || !adminData || adminData.length === 0) {
-      throw new Error('No admin found for your organization');
+      throw new Error('No eligible leave approver found for your organization');
     }
 
     const adminId = adminData[0].id;

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { HiLocationMarker, HiCheckCircle, HiXCircle } from 'react-icons/hi';
 import { supabase } from '../utils/supabaseClient';
-import { getCurrentLocation, isValidCoordinate, formatDistance, calculateDistance, GeofenceSettings } from '../utils/geolocation';
+import { getCurrentLocation, isValidCoordinate, formatDistance, getGeofenceLocations, getNearestGeofenceDistance, parseGeofenceSettings, GeofenceSettings } from '../utils/geolocation';
 
 interface GeofenceSettingsProps {
   organizationId: string;
@@ -18,6 +18,12 @@ const GeofenceSettingsComponent: React.FC<GeofenceSettingsProps> = ({ organizati
   const [latitude, setLatitude] = useState<string>('');
   const [longitude, setLongitude] = useState<string>('');
   const [address, setAddress] = useState<string>('');
+  const [secondaryEnabled, setSecondaryEnabled] = useState(false);
+  const [secondaryLatitude, setSecondaryLatitude] = useState('');
+  const [secondaryLongitude, setSecondaryLongitude] = useState('');
+  const [secondaryAddress, setSecondaryAddress] = useState('');
+  const [savedSettings, setSavedSettings] = useState<Record<string, any>>({});
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   
   // Geofence settings state
   const [geofenceEnabled, setGeofenceEnabled] = useState(true);
@@ -34,22 +40,24 @@ const GeofenceSettingsComponent: React.FC<GeofenceSettingsProps> = ({ organizati
   }, [organizationId]);
 
   useEffect(() => {
-    // Calculate preview distance when org location or user location changes
-    if (latitude && longitude && userLocation) {
-      const lat = parseFloat(latitude);
-      const lon = parseFloat(longitude);
-      if (isValidCoordinate(lat, lon)) {
-        const distance = calculateDistance(userLocation.lat, userLocation.lon, lat, lon);
-        setPreviewDistance(distance);
-      }
-    } else {
-      setPreviewDistance(null);
-    }
-  }, [latitude, longitude, userLocation]);
+    const locations = getGeofenceLocations({
+      location_latitude: latitude ? Number(latitude) : null,
+      location_longitude: longitude ? Number(longitude) : null,
+      geofence_settings: { secondary_location: {
+        enabled: secondaryEnabled,
+        latitude: secondaryLatitude ? Number(secondaryLatitude) : null,
+        longitude: secondaryLongitude ? Number(secondaryLongitude) : null,
+      } },
+    });
+    setPreviewDistance(userLocation
+      ? getNearestGeofenceDistance(userLocation.lat, userLocation.lon, locations)
+      : null);
+  }, [latitude, longitude, secondaryEnabled, secondaryLatitude, secondaryLongitude, userLocation]);
 
   const fetchSettings = async () => {
     try {
       setLoading(true);
+      setSettingsLoaded(false);
       setError(null);
 
       const { data, error: fetchError } = await supabase
@@ -65,13 +73,17 @@ const GeofenceSettingsComponent: React.FC<GeofenceSettingsProps> = ({ organizati
         setLongitude(data.location_longitude?.toString() || '');
         setAddress(data.location_address || '');
 
-        const settings = data.geofence_settings as any;
-        if (settings) {
-          setGeofenceEnabled(settings.enabled ?? true);
-          setEnforcementMode(settings.enforcement_mode ?? 'strict');
-          setDistanceThreshold(settings.distance_threshold_meters ?? 500);
-          setAllowAdminOverride(settings.allow_admin_override ?? true);
-        }
+        const settings = parseGeofenceSettings(data.geofence_settings);
+        setSavedSettings(data.geofence_settings || {});
+        setGeofenceEnabled(settings.enabled);
+        setEnforcementMode(settings.enforcement_mode);
+        setDistanceThreshold(settings.distance_threshold_meters);
+        setAllowAdminOverride(settings.allow_admin_override);
+        setSecondaryEnabled(settings.secondary_location.enabled);
+        setSecondaryLatitude(settings.secondary_location.latitude?.toString() ?? '');
+        setSecondaryLongitude(settings.secondary_location.longitude?.toString() ?? '');
+        setSecondaryAddress(settings.secondary_location.address);
+        setSettingsLoaded(true);
       }
     } catch (err) {
       console.error('Error fetching geofence settings:', err);
@@ -81,7 +93,7 @@ const GeofenceSettingsComponent: React.FC<GeofenceSettingsProps> = ({ organizati
     }
   };
 
-  const handleGetCurrentLocation = async () => {
+  const handleGetCurrentLocation = async (secondary = false) => {
     try {
       setLocationFetching(true);
       setError(null);
@@ -91,8 +103,13 @@ const GeofenceSettingsComponent: React.FC<GeofenceSettingsProps> = ({ organizati
         throw new Error('Unable to get current location. Please check GPS permissions.');
       }
 
-      setLatitude(location.latitude.toFixed(8));
-      setLongitude(location.longitude.toFixed(8));
+      if (secondary) {
+        setSecondaryLatitude(location.latitude.toFixed(8));
+        setSecondaryLongitude(location.longitude.toFixed(8));
+      } else {
+        setLatitude(location.latitude.toFixed(8));
+        setLongitude(location.longitude.toFixed(8));
+      }
       setUserLocation({ lat: location.latitude, lon: location.longitude });
       setSuccessMessage('Location captured successfully!');
       setTimeout(() => setSuccessMessage(null), 3000);
@@ -124,25 +141,44 @@ const GeofenceSettingsComponent: React.FC<GeofenceSettingsProps> = ({ organizati
   };
 
   const handleSave = async () => {
+    if (!settingsLoaded) return;
     try {
       setSaving(true);
       setError(null);
       setSuccessMessage(null);
 
       // Validate coordinates
-      const lat = parseFloat(latitude);
-      const lon = parseFloat(longitude);
+      const lat = Number(latitude);
+      const lon = Number(longitude);
 
-      if (latitude && longitude && !isValidCoordinate(lat, lon)) {
+      if ((geofenceEnabled || latitude || longitude) &&
+          (!latitude.trim() || !longitude.trim() || !isValidCoordinate(lat, lon))) {
         throw new Error('Invalid coordinates. Latitude must be -90 to 90, longitude must be -180 to 180.');
+      }
+      const secondaryLat = Number(secondaryLatitude);
+      const secondaryLon = Number(secondaryLongitude);
+      if ((secondaryEnabled || secondaryLatitude || secondaryLongitude) &&
+          (!secondaryLatitude.trim() || !secondaryLongitude.trim() || !isValidCoordinate(secondaryLat, secondaryLon))) {
+        throw new Error('Enter valid latitude and longitude for the second location, or clear both fields and disable it.');
+      }
+      if (!Number.isFinite(distanceThreshold) || distanceThreshold <= 0) {
+        throw new Error('The allowed distance must be greater than zero.');
       }
 
       // Prepare geofence settings
       const settings: GeofenceSettings = {
+        ...savedSettings,
         enabled: geofenceEnabled,
         enforcement_mode: enforcementMode,
         distance_threshold_meters: distanceThreshold,
         allow_admin_override: allowAdminOverride,
+        secondary_location: {
+          ...savedSettings.secondary_location,
+          enabled: secondaryEnabled,
+          latitude: secondaryLatitude ? secondaryLat : null,
+          longitude: secondaryLongitude ? secondaryLon : null,
+          address: secondaryAddress.trim(),
+        },
       };
 
       // Update organization
@@ -186,7 +222,7 @@ const GeofenceSettingsComponent: React.FC<GeofenceSettingsProps> = ({ organizati
         </h3>
         <p className="text-sm text-blue-700">
           Configure your organization's location and geofencing rules. Employees will be validated 
-          against this location when punching in/out. Strict mode blocks punch attempts outside the 
+          against either enabled location when punching in/out. Strict mode blocks punch attempts outside the
           geofence, while warning mode allows them with a flag.
         </p>
       </div>
@@ -207,7 +243,7 @@ const GeofenceSettingsComponent: React.FC<GeofenceSettingsProps> = ({ organizati
 
       {/* Organization Location */}
       <div className="space-y-4">
-        <h4 className="font-medium text-gray-900">Organization Location</h4>
+        <h4 className="font-medium text-gray-900">Primary Location</h4>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
@@ -252,13 +288,57 @@ const GeofenceSettingsComponent: React.FC<GeofenceSettingsProps> = ({ organizati
         </div>
 
         <button
-          onClick={handleGetCurrentLocation}
+          onClick={() => handleGetCurrentLocation()}
           disabled={locationFetching}
           className="flex items-center gap-2 px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <HiLocationMarker className="w-4 h-4" />
           {locationFetching ? 'Getting Location...' : 'Use My Current Location'}
         </button>
+      </div>
+
+      <div className="space-y-4 pt-4 border-t">
+        <h4 className="font-medium text-gray-900">Second Location (Optional)</h4>
+        <label className="flex items-center gap-2 text-sm text-gray-900">
+          <input
+            type="checkbox"
+            checked={secondaryEnabled}
+            onChange={(e) => setSecondaryEnabled(e.target.checked)}
+            className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+          />
+          Allow punches at a second location
+        </label>
+        <p className="text-sm text-gray-600">
+          Off by default. When enabled, staff may punch within {distanceThreshold}m of either location.
+          They do not need to be near both. When off, only the primary location is used.
+        </p>
+        {secondaryEnabled && (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="block text-sm font-medium text-gray-700">
+                Second location latitude
+                <input type="number" step="any" min="-90" max="90"
+                  value={secondaryLatitude} onChange={(e) => setSecondaryLatitude(e.target.value)}
+                  className="mt-1 w-full rounded-md border-gray-300 shadow-sm" />
+              </label>
+              <label className="block text-sm font-medium text-gray-700">
+                Second location longitude
+                <input type="number" step="any" min="-180" max="180"
+                  value={secondaryLongitude} onChange={(e) => setSecondaryLongitude(e.target.value)}
+                  className="mt-1 w-full rounded-md border-gray-300 shadow-sm" />
+              </label>
+            </div>
+            <label className="block text-sm font-medium text-gray-700">
+              Second location address (optional)
+              <input type="text" value={secondaryAddress} onChange={(e) => setSecondaryAddress(e.target.value)}
+                className="mt-1 w-full rounded-md border-gray-300 shadow-sm" />
+            </label>
+            <button onClick={() => handleGetCurrentLocation(true)} disabled={locationFetching}
+              className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-50">
+              {locationFetching ? 'Getting Location...' : 'Use My Current Location for Second Location'}
+            </button>
+          </>
+        )}
       </div>
 
       {/* Geofence Settings */}
@@ -318,15 +398,15 @@ const GeofenceSettingsComponent: React.FC<GeofenceSettingsProps> = ({ organizati
               </label>
               <input
                 type="range"
-                min="100"
+                min="50"
                 max="2000"
-                step="100"
+                step="50"
                 value={distanceThreshold}
                 onChange={(e) => setDistanceThreshold(parseInt(e.target.value))}
                 className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
               />
               <div className="flex justify-between text-xs text-gray-500 mt-1">
-                <span>100m</span>
+                <span>50m</span>
                 <span>1000m</span>
                 <span>2000m</span>
               </div>
@@ -364,7 +444,7 @@ const GeofenceSettingsComponent: React.FC<GeofenceSettingsProps> = ({ organizati
           {previewDistance !== null && (
             <div className={`p-3 rounded-lg ${previewDistance <= distanceThreshold ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
               <p className="text-sm">
-                Your current distance from organization: <strong>{formatDistance(previewDistance)}</strong>
+                Distance from nearest allowed location: <strong>{formatDistance(previewDistance)}</strong>
               </p>
               <p className="text-xs mt-1 text-gray-600">
                 {previewDistance <= distanceThreshold 
@@ -380,7 +460,7 @@ const GeofenceSettingsComponent: React.FC<GeofenceSettingsProps> = ({ organizati
       <div className="pt-4 border-t">
         <button
           onClick={handleSave}
-          disabled={saving || !latitude || !longitude}
+          disabled={saving || !settingsLoaded}
           className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {saving ? 'Saving...' : 'Save Geofence Settings'}

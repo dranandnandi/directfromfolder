@@ -1,3 +1,6 @@
+import { requireVerifiedOrganization } from './utils/verifiedOrganization';
+import { PAYROLL_ROLES, PAYSLIP_ROLES } from './utils/permissions';
+import { StaffPermissionRoute, useStaffAccess } from './contexts/StaffAccessContext';
 import { useState, useEffect, useRef } from 'react';
 import { Routes, Route, useNavigate } from 'react-router-dom';
 import { supabase, retryOperation } from './utils/supabaseClient';
@@ -14,6 +17,11 @@ import NotificationModal from './components/NotificationModal';
 
 
 const Settings = lazy(() => import('./components/Settings'));
+const ApprovalsInbox = lazy(() => import('./components/ApprovalsInbox'));
+const TrainingManagement = lazy(() => import('./components/TrainingManagement'));
+const StaffAccessGroups = lazy(() => import('./components/StaffAccessGroups'));
+const StaffAttendanceOverview = lazy(() => import('./components/hr/StaffAttendanceOverview'));
+const TrainingMaterials = lazy(() => import('./components/hr/TrainingMaterials'));
 const UserManagement = lazy(() => import('./components/UserManagement'));
 const Reports = lazy(() => import('./components/Reports'));
 const TaskModal = lazy(() => import('./components/TaskModal'));
@@ -109,6 +117,7 @@ const toTaskUser = (user: RawSupabaseUser): User => ({
 });
 
 function App() {
+  const { can } = useStaffAccess();
   const navigate = useNavigate();
   const [session, setSession] = useState<any>(null);
   const [passwordRecovery, setPasswordRecovery] = useState(false);
@@ -126,6 +135,10 @@ function App() {
   const [profileError, setProfileError] = useState<string | null>(null);
   const [hasInitialDataLoaded, setHasInitialDataLoaded] = useState(false);
   const isFetchingRef = useRef(false);
+
+  useEffect(() => {
+    if (isProfileEnsured && userOrganizationId) window.dispatchEvent(new Event('staff-access-updated'));
+  }, [isProfileEnsured, userOrganizationId, userRole]);
 
   // Initialize mobile app services (push notifications, etc.)
   useMobileApp();
@@ -204,43 +217,23 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const setupUserProfile = async () => {
-      if (!session) {
-        console.log('No session, skipping profile setup');
-        return;
-      }
-
-      setLoading(true);
-
-      try {
-        console.log('Setting up user profile...');
-        const organizationId = await ensureUserProfile();
-
-        if (organizationId) {
-          console.log('User profile setup complete with organization ID:', organizationId);
-          setUserOrganizationId(organizationId);
-          setOrganizationSettings(prevSettings => ({
-            ...prevSettings,
-            id: organizationId,
-            organizationId: organizationId
-          }));
-
-          // Fetch initial data only once
-          setIsProfileEnsured(true);
-        }
-      } catch (error) {
-        console.error('Error in user profile setup:', error);
-        setProfileError('Failed to set up user profile. Please try again or contact support.');
-      } finally {
-        setIsProfileEnsured(true);
-        setLoading(false);
-      }
-    };
-
-    if (session && !isProfileEnsured) {
-      setupUserProfile();
-    }
-  }, [session, isProfileEnsured]);
+    let active = true;
+    setUserOrganizationId(null); setUserRole(''); setIsProfileEnsured(false);
+    setHasInitialDataLoaded(false); setProfileError(null);
+    setTasks([]); setPersonalTasks([]); setTeamMembers([]);
+    if (!session?.user?.id) return () => { active = false; };
+    setLoading(true);
+    void ensureUserProfile().then(organizationId => {
+      if (!active) return;
+      setUserOrganizationId(organizationId);
+      setOrganizationSettings(previous => ({ ...previous, id: organizationId, organizationId }));
+    }).catch(error => {
+      if (active) setProfileError(error instanceof Error ? error.message : 'Organisation access could not be verified.');
+    }).finally(() => {
+      if (active) { setIsProfileEnsured(true); setLoading(false); }
+    });
+    return () => { active = false; };
+  }, [session?.user?.id]);
 
   // New useEffect for initial data loading
   useEffect(() => {
@@ -361,120 +354,15 @@ function App() {
     }
   };
 
-  // Ensure user profile exists with organization_id
-  const ensureUserProfile = async (): Promise<string | null> => {
-    try {
-      // If we already have an organization ID and profile is ensured, return it
-      if (userOrganizationId && isProfileEnsured) {
-        console.log('Using existing organization ID:', userOrganizationId);
-        return userOrganizationId;
-      }
-
-      return await retryOperation(async () => {
-        if (!session?.user?.id) throw new Error('No authenticated user');
-
-        console.log('Ensuring user profile for auth ID:', session.user.id);
-
-        // Check if user exists in users table
-        const { data: existingUser, error: userError } = await supabase
-          .from('users')
-          .select('id, organization_id, role')
-          .eq('auth_id', session.user.id)
-          .single();
-
-        console.log('User lookup result:', { existingUser, error: userError?.message });
-
-        // If user doesn't exist or has no organization_id, we need to fix it
-        if (userError || !existingUser || !existingUser.organization_id) {
-          console.log('User needs organization setup');
-
-          // First, try to find an existing organization
-          const { data: organizations, error: orgError } = await supabase
-            .from('organizations')
-            .select('id')
-            .limit(1);
-
-          if (orgError) throw orgError;
-          console.log('Organizations lookup result:', { organizations });
-
-          let organizationId: string;
-
-          if (organizations && organizations.length > 0) {
-            // Use existing organization
-            organizationId = organizations[0].id;
-            console.log('Using existing organization:', organizationId);
-          } else {
-            // Create a new organization if none exists
-            console.log('Creating new organization');
-            const { data: newOrg, error: createOrgError } = await supabase
-              .from('organizations')
-              .insert([{
-                name: 'Default Organization',
-                max_users: 10,
-                current_users: 0
-              }])
-              .select('id')
-              .single();
-
-            if (createOrgError) throw createOrgError;
-            organizationId = newOrg.id;
-          }
-
-          if (existingUser) {
-            // Update existing user with organization_id
-            console.log('Updating existing user with organization ID');
-            const { error: updateError } = await supabase
-              .from('users')
-              .update({
-                organization_id: organizationId,
-                role: existingUser.role || 'user'
-              })
-              .eq('id', existingUser.id);
-
-            if (updateError) throw updateError;
-
-            // Initialize default notification preferences for existing user
-            await initializeDefaultNotificationPreferences(existingUser.id);
-          } else {
-            // Create new user profile
-            console.log('Creating new user profile');
-            const { data: newUser, error: insertError } = await supabase
-              .from('users')
-              .insert([{
-                auth_id: session.user.id,
-                organization_id: organizationId,
-                name: session.user.email?.split('@')[0] || 'User',
-                email: session.user.email || '',
-                whatsapp_number: session.user.phone || `temp_${Date.now()}`,
-                role: 'user',
-                department: 'General'
-              }])
-              .select('id')
-              .single();
-
-            if (insertError) throw insertError;
-
-            // Initialize default notification preferences for new user
-            if (newUser) {
-              await initializeDefaultNotificationPreferences(newUser.id);
-            }
-          }
-
-          return organizationId;
-        }
-
-        console.log('User profile exists with organization ID:', existingUser.organization_id);
-        // User exists and has organization_id, just initialize preferences if missing
-        await initializeDefaultNotificationPreferences(existingUser.id);
-
-        console.log('User profile setup complete');
-        return existingUser.organization_id;
-      });
-    } catch (error) {
-      console.error('Error ensuring user profile:', error);
-      setProfileError('Failed to set up user profile. Please contact support.');
-      return null;
-    }
+  // Organisation membership is provisioned by an administrator, never guessed.
+  const ensureUserProfile = async (): Promise<string> => {
+    if (!session?.user?.id) throw new Error('Sign in to continue.');
+    const { data, error } = await supabase.from('users')
+      .select('id, auth_id, organization_id, is_active').eq('auth_id', session.user.id).maybeSingle();
+    if (error) throw new Error('Your organisation membership could not be checked. Please retry.');
+    const organizationId = requireVerifiedOrganization(data, session.user.id);
+    await initializeDefaultNotificationPreferences(data!.id);
+    return organizationId;
   };
 
   const fetchPersonalTasks = async () => {
@@ -975,6 +863,15 @@ function App() {
     return <ResetPasswordForm onComplete={() => setPasswordRecovery(false)} />;
   }
 
+  if (!isProfileEnsured || !userOrganizationId || profileError) {
+    return <div className="min-h-screen flex items-center justify-center p-6"><div className="bg-white p-6 rounded shadow max-w-lg">
+      <h1 className="text-xl font-semibold">Organisation access required</h1>
+      <p className="my-4">{profileError || 'Checking your organisation membership?'}</p>
+      <button className="underline mr-4" onClick={() => window.location.reload()}>Retry</button>
+      <button className="underline" onClick={() => void supabase.auth.signOut()}>Sign out</button>
+    </div></div>;
+  }
+
   return (
     <div className="min-h-screen bg-gray-100 safe-area-container">
       {/* Sidebar for larger screens */}
@@ -1016,7 +913,9 @@ function App() {
             <Routes>
               <Route path="/" element={
                 <DashboardContainer
+                  key={session?.user?.id}
                   currentUserId={session?.user?.id}
+                  userRole={userRole}
                   tasks={tasks}
                   personalTasks={personalTasks}
                   onAddTask={handleAddTaskClick}
@@ -1024,6 +923,26 @@ function App() {
                   onTaskUpdate={handleRefreshTasks}
                   teamMembers={teamMembers}
                 />
+              } />
+              <Route path="/tasks" element={<DashboardContainer
+                key={`tasks-${session?.user?.id}`} initialView="all" userRole={userRole}
+                currentUserId={session?.user?.id} tasks={tasks} personalTasks={personalTasks}
+                onAddTask={handleAddTaskClick} onEditTask={handleEditTask} onTaskUpdate={handleRefreshTasks} teamMembers={teamMembers}
+              />} />
+              <Route path="/approvals" element={<StaffPermissionRoute permissions={['attendance.approve', 'leave.approve']}>
+                <Suspense fallback={<div className="p-4">Loading approvals...</div>}><ApprovalsInbox /></Suspense>
+              </StaffPermissionRoute>} />
+              <Route path="/team/access-groups" element={<ProtectedRoute allowedRoles={['admin', 'superadmin']}>
+                <Suspense fallback={<div className="p-4">Loading access groups...</div>}><StaffAccessGroups /></Suspense>
+              </ProtectedRoute>} />
+              <Route path="/attendance/team" element={<StaffPermissionRoute permissions={['attendance.approve']}>
+                <Suspense fallback={<div className="p-4">Loading team attendance...</div>}><StaffAttendanceOverview /></Suspense>
+              </StaffPermissionRoute>} />
+              <Route path="/training/materials" element={<StaffPermissionRoute permissions={['training_materials.manage']}>
+                <Suspense fallback={<div className="p-4">Loading training materials...</div>}><TrainingMaterials /></Suspense>
+              </StaffPermissionRoute>} />
+              <Route path="/training" element={
+                <Suspense fallback={<div className="p-4">Loading training...</div>}><TrainingManagement /></Suspense>
               } />
               <Route path="/settings" element={
                 <Suspense fallback={<div className="p-4">Loading settings...</div>}>
@@ -1072,7 +991,7 @@ function App() {
               } />
               <Route path="/leaveManagement" element={
                 <Suspense fallback={<div className="p-4">Loading leave management...</div>}>
-                  <LeaveManagement userId={session?.user?.id} isAdmin={userRole === 'admin' || userRole === 'superadmin'} />
+                  <LeaveManagement userId={session?.user?.id} isAdmin={can('leave.approve')} />
                 </Suspense>
               } />
               <Route path="/attendance" element={
@@ -1131,7 +1050,7 @@ function App() {
                 </Suspense>
               } />
               <Route path="/payroll/*" element={
-                <ProtectedRoute allowedRoles={['admin', 'payroll_admin']}>
+                <ProtectedRoute allowedRoles={PAYROLL_ROLES}>
                   <Suspense fallback={<div className="p-4">Loading payroll...</div>}>
                     {userOrganizationId ? (
                       <OrganizationProvider organizationId={userOrganizationId}>
@@ -1144,7 +1063,7 @@ function App() {
                 </ProtectedRoute>
               } />
               <Route path="/my-payslip" element={
-                <ProtectedRoute allowedRoles={['admin', 'payroll_admin', 'user']}>
+                <ProtectedRoute allowedRoles={PAYSLIP_ROLES}>
                   <Suspense fallback={<div className="p-4">Loading payslip...</div>}>
                     <MyPayslip />
                   </Suspense>
@@ -1153,6 +1072,7 @@ function App() {
               {/* Catch-all route - redirect to dashboard */}
               <Route path="*" element={
                 <DashboardContainer
+                  key={session?.user?.id}
                   currentUserId={session?.user?.id}
                   tasks={tasks}
                   personalTasks={personalTasks}
@@ -1168,7 +1088,7 @@ function App() {
         </div>
 
         {/* Bottom Navigation for Mobile */}
-        <BottomNavigation onMenuClick={() => setSidebarOpen(true)} />
+        <BottomNavigation userRole={userRole} onMenuClick={() => setSidebarOpen(true)} />
 
         {/* Task Modal */}
         <Suspense fallback={null}>

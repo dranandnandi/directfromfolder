@@ -395,16 +395,19 @@ export const documentService = {
   /**
    * Get document statistics for an organization
    */
-  async getDocumentStats(organizationId: string): Promise<{
+  async getDocumentStats(organizationId: string, category?: string): Promise<{
     totalDocuments: number;
     totalSize: number;
     byCategory: Record<string, number>;
   }> {
-    const { data, error } = await supabase
+    let query = supabase
       .from('organization_documents')
       .select('category, file_size')
       .eq('organization_id', organizationId)
       .is('deleted_at', null);
+
+    if (category) query = query.eq('category', category);
+    const { data, error } = await query;
 
     if (error) {
       throw new Error(`Failed to get stats: ${error.message}`);

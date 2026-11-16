@@ -22,6 +22,8 @@ const LeavePolicySettings: React.FC<LeavePolicySettingsProps> = ({ organizationI
 
   const [yearStartMonth, setYearStartMonth] = useState(4);
   const [types, setTypes] = useState<LeaveTypeConfig[]>([]);
+  const [excludedWeekdays, setExcludedWeekdays] = useState<number[]>([]);
+  const [excludedDates, setExcludedDates] = useState('');
 
   useEffect(() => {
     fetchPolicy();
@@ -43,6 +45,8 @@ const LeavePolicySettings: React.FC<LeavePolicySettingsProps> = ({ organizationI
       const policy = parseLeavePolicy(data?.leave_policy);
       setYearStartMonth(policy.year_start_month);
       setTypes(policy.types);
+      setExcludedWeekdays(policy.excluded_weekdays || []);
+      setExcludedDates((policy.excluded_dates || []).join('\n'));
     } catch (err) {
       console.error('Error fetching leave policy:', err);
       setError(err instanceof Error ? err.message : 'Failed to load leave policy');
@@ -83,7 +87,11 @@ const LeavePolicySettings: React.FC<LeavePolicySettingsProps> = ({ organizationI
       }
       if (types.length === 0) throw new Error('Add at least one leave type.');
 
-      const policy: LeavePolicy = parseLeavePolicy({ year_start_month: yearStartMonth, types });
+      const dates = excludedDates.split(/[\s,]+/).filter(Boolean);
+      if (dates.some(date => !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`)) || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date)) {
+        throw new Error('Enter valid holiday dates in YYYY-MM-DD format, one per line.');
+      }
+      const policy: LeavePolicy = parseLeavePolicy({ year_start_month: yearStartMonth, types, excluded_weekdays: excludedWeekdays, excluded_dates: dates });
 
       const { error: updateError } = await supabase
         .from('organizations')
@@ -162,6 +170,23 @@ const LeavePolicySettings: React.FC<LeavePolicySettingsProps> = ({ organizationI
           April gives an April-to-March year; January gives a calendar year.
         </p>
       </div>
+
+      <fieldset className="space-y-3 rounded-lg border border-gray-200 p-4">
+        <legend className="px-1 font-medium text-gray-900">Leave counting calendar</legend>
+        <p className="text-sm text-gray-600">Choose days that should not reduce leave balances. Leave all unchecked to count every calendar day. These rules apply to leave balances across the organization.</p>
+        <div className="flex flex-wrap gap-4">
+          {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day, index) => (
+            <label key={day} className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={excludedWeekdays.includes(index)} onChange={event => setExcludedWeekdays(current => event.target.checked ? [...current, index] : current.filter(value => value !== index))} />
+              Exclude {day}
+            </label>
+          ))}
+        </div>
+        <label className="block text-sm font-medium text-gray-700">Holiday dates to exclude (YYYY-MM-DD, one per line)
+          <textarea rows={4} value={excludedDates} onChange={event => setExcludedDates(event.target.value)} placeholder={'2026-12-25\n2027-01-26'} className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2" />
+        </label>
+        <p className="text-xs text-gray-500">Requests spanning two leave years are split between those years. Changing this calendar recalculates existing balances.</p>
+      </fieldset>
 
       {/* Leave types */}
       <div>

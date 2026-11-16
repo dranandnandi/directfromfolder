@@ -676,6 +676,9 @@ Thank you for keeping us informed.`;
               {tab.label}
             </button>
           ))}
+          <Link to="/training" className="flex items-center rounded-md px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50">
+            Training
+          </Link>
         </nav>
       </div>
 

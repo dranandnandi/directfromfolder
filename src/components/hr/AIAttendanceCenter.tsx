@@ -20,7 +20,7 @@ const Card = ({
       <div>
         <h3 className="text-base font-semibold text-gray-900">{title}</h3>
         <p className="text-sm text-gray-600">{description}</p>
-        <p className="mt-2 text-xs text-blue-700">{to}</p>
+        <p className="mt-2 text-sm font-medium text-blue-700">Open {title.toLowerCase()}</p>
       </div>
     </div>
   </Link>
@@ -46,7 +46,7 @@ export default function AIAttendanceCenter() {
         <Card
           to="/attendance/ai-configurator"
           title="AI Shift Configurator"
-          description="Voice/text instruction to policy JSON with approval flow."
+          description="Describe shift rules by voice or text, then review and approve the proposed settings."
           icon={HiCog}
         />
         <Card

@@ -76,7 +76,7 @@ function NavTab({ to, label, icon }: { to: string; label: string; icon?: React.R
       to={to}
       end={to === "/payroll"} // Only exact match for root
       className={({ isActive }) =>
-        `flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive
+        `flex shrink-0 items-center gap-2 whitespace-nowrap px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive
           ? "bg-blue-50 text-blue-700"
           : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
         }`
@@ -173,32 +173,33 @@ function InnerShell() {
         {/* Top Navigation Bar */}
         <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex justify-between h-16">
+            <div className="flex flex-wrap items-center justify-between gap-3 py-3">
               <div className="flex">
                 <div className="flex-shrink-0 flex items-center">
                   <span className="text-xl font-bold text-gray-900">Payroll</span>
                 </div>
-                <nav className="hidden sm:ml-6 sm:flex sm:space-x-2 items-center">
-                  <NavTab to="/payroll" label="Dashboard" />
-                  <NavTab to="/payroll/period-board" label="Run Payroll" />
-                  <NavTab to="/payroll/compensation" label="Compensation" />
-                  <NavTab to="/payroll/attendance-intelligence" label="Attendance AI" />
-                  <NavTab to="/payroll/ai-review" label="AI Review" />
-                  <NavTab to="/payroll/statutory" label="Statutory" />
-                  <NavTab to="/payroll/settings" label="Settings" />
-                </nav>
               </div>
 
-              <div className="flex items-center gap-3">
-                <div className="w-44">
+              <div className="flex w-full items-center gap-3 sm:w-auto">
+                <div className="min-w-0 flex-1 sm:w-44">
                   <MonthSelector month={month} setMonth={setMonth} />
                 </div>
-                <div className="w-32">
+                <div className="w-28 shrink-0">
                   <YearSelector year={year} setYear={setYear} />
                 </div>
               </div>
             </div>
           </div>
+
+          <nav aria-label="Payroll sections" className="flex gap-1 overflow-x-auto border-t px-4 py-2">
+            <NavTab to="/payroll" label="Dashboard" />
+            <NavTab to="/payroll/period-board" label="Run Payroll" />
+            <NavTab to="/payroll/compensation" label="Compensation" />
+            <NavTab to="/payroll/attendance-intelligence" label="Attendance AI" />
+            <NavTab to="/payroll/ai-review" label="AI Review" />
+            <NavTab to="/payroll/statutory" label="Statutory" />
+            <NavTab to="/payroll/settings" label="Settings" />
+          </nav>
 
           {/* Secondary Nav for Sub-sections (Import Wizard) */}
           <div className="bg-gray-50 border-b border-gray-200">

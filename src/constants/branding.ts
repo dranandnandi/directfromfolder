@@ -57,8 +57,22 @@ const MEDITRUST_BRANDING: Branding = {
   overrideOrganizationName: true,
 };
 
+const STAFF_LOGO_URL = 'https://ik.imagekit.io/18tsendxqy/Anpro%20OPD/Screenshot%202025-12-22%20144441.png?updatedAt=1785646087565';
+
+const STAFF_BRANDING: Branding = {
+  ...MEDITRUST_BRANDING,
+  icon: STAFF_LOGO_URL,
+  logo: STAFF_LOGO_URL,
+  // On the staff portal, show the logged-in organization's name from the DB.
+  overrideOrganizationName: false,
+};
+
 /** hostname suffix -> branding. First match wins. */
 const DOMAIN_BRANDING: Array<{ match: (host: string) => boolean; branding: Branding }> = [
+  {
+    match: (host) => host === 'staff.anprohealthtech.com',
+    branding: STAFF_BRANDING,
+  },
   {
     match: (host) => host === 'anprohealthtech.com' || host.endsWith('.anprohealthtech.com'),
     branding: MEDITRUST_BRANDING,

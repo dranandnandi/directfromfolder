@@ -1,3 +1,5 @@
+import { supabase } from '../utils/supabaseClient';
+
 export async function callEdge<T>(name: string, body: any, init?: RequestInit): Promise<T> {
   // Prefer explicit functions URL, else infer from Supabase URL
   let base = import.meta.env.VITE_SUPABASE_FUNCTIONS_URL as string | undefined;
@@ -15,11 +17,13 @@ export async function callEdge<T>(name: string, body: any, init?: RequestInit): 
   }
   const url = `${base}/${name}`;
   const anon = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+  const { data: { session } } = await supabase.auth.getSession();
   const res = await fetch(url, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      ...(anon ? { apikey: anon, Authorization: `Bearer ${anon}` } : {}),
+      ...(anon ? { apikey: anon } : {}),
+      ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : anon ? { Authorization: `Bearer ${anon}` } : {}),
       ...(init?.headers || {}),
     },
     body: JSON.stringify(body),

@@ -70,7 +70,7 @@ serve(async (req) => {
     // Verify admin exists and has admin role
     const { data: adminData, error: adminError } = await supabaseAdmin
       .from('users')
-      .select('id, name, role, organization_id')
+      .select('id, name, role, organization_id, is_active')
       .eq('id', userId)
       .single();
 
@@ -82,9 +82,10 @@ serve(async (req) => {
       throw new Error('Admin does not belong to this organization');
     }
 
-    if (!['admin', 'superadmin'].includes(adminData.role)) {
-      throw new Error('Only admins can approve/reject leave requests');
-    }
+    const { data: mayApprove, error: permissionError } = await supabaseAdmin.rpc('fn_staff_user_has_permission', {
+      p_user: adminData.id, p_org: organizationId, p_permission: 'leave.approve',
+    });
+    if (permissionError || !mayApprove || adminData.is_active !== true) throw new Error('Active leave approval permission is required');
 
     console.log('Admin verified:', adminData.name, adminData.role);
 
@@ -94,7 +95,7 @@ serve(async (req) => {
       .from('tasks')
       .select('id, title, description, created_by, assigned_to, status, created_at')
       .eq('organization_id', organizationId)
-      .eq('assigned_to', userId) // Assigned to this admin
+      .neq('created_by', userId) // Approval is organization-scoped; never approve your own request.
       .eq('status', 'pending')
       .ilike('title', 'Leave Request:%')
       .order('created_at', { ascending: false });
@@ -194,29 +195,13 @@ serve(async (req) => {
       endDate
     });
 
-    // Update task status. 'cancelled' is the value the app and the performance
-    // report views read as a rejected leave - 'rejected' reads back as pending.
-    const newStatus = action === 'approve' ? 'completed' : 'cancelled';
-
-    // Same decision block the app writes, so both paths parse identically.
-    const decisionBlock = `\n\n---\nDECISION: ${action === 'approve' ? 'APPROVED' : 'REJECTED'}` +
-      `\nDecided By: ${adminData.name} (via WhatsApp)` +
-      `\nDecided At: ${new Date().toISOString()}` +
-      `\nDecision Note: ${reason?.trim() || (action === 'approve' ? 'Approved' : 'No reason provided')}`;
-
-    const { error: updateError } = await supabaseAdmin
-      .from('tasks')
-      .update({
-        status: newStatus,
-        completed_at: action === 'approve' ? new Date().toISOString() : null,
-        updated_at: new Date().toISOString(),
-        description: targetRequest.description + decisionBlock
-      })
-      .eq('id', targetRequest.id);
+    const { error: updateError } = await supabaseAdmin.rpc('fn_service_decide_staff_leave', {
+      p_actor: adminData.id, p_id: targetRequest.id, p_action: action, p_note: reason?.trim() || '',
+    });
 
     if (updateError) {
       console.error('Update error:', updateError);
-      throw new Error('Failed to update leave request status');
+      throw new Error(updateError.message || 'Failed to update leave request status');
     }
 
     console.log(`Leave request ${action}ed successfully`);
